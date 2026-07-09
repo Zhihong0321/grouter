@@ -1,0 +1,13 @@
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "node dist/server.js"
+healthcheckPath = "/healthz"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+
+[deploy.release]
+# Runs migrations before the new release takes traffic.
+command = "pnpm migrate:up"

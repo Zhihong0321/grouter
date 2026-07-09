@@ -1,0 +1,4 @@
+DROP TABLE IF EXISTS usage_logs;
+DROP TABLE IF EXISTS model_prices;
+DROP TABLE IF EXISTS api_keys;
+DROP TABLE IF EXISTS admin_users;
