@@ -2,11 +2,38 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { api, centsToDollars, type ApiKeyDto } from "../api/client.js";
 
+function KeyCell({ prefix, fullKey }: { prefix: string; fullKey: string | null }) {
+  const [revealed, setRevealed] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  if (!fullKey) {
+    return (
+      <code title="Created before key recovery was added -- revoke and reissue to get a viewable key">
+        {prefix}… (unavailable, reissue to recover)
+      </code>
+    );
+  }
+
+  const copy = async () => {
+    await navigator.clipboard.writeText(fullKey);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      <code>{revealed ? fullKey : `${prefix}…`}</code>
+      <button type="button" className="secondary" onClick={() => setRevealed((r) => !r)}>
+        {revealed ? "Hide" : "Show"}
+      </button>
+      <button type="button" onClick={copy}>{copied ? "Copied!" : "Copy"}</button>
+    </span>
+  );
+}
+
 export default function KeysListPage() {
   const [keys, setKeys] = useState<ApiKeyDto[]>([]);
   const [showCreate, setShowCreate] = useState(false);
-  const [plaintextReveal, setPlaintextReveal] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
 
   const [name, setName] = useState("");
   const [rateLimitRpm, setRateLimitRpm] = useState(60);
@@ -17,18 +44,10 @@ export default function KeysListPage() {
 
   const create = async (e: FormEvent) => {
     e.preventDefault();
-    const created = await api.createKey({ name, rateLimitRpm, budgetCents });
-    setPlaintextReveal(created.plaintextKey);
-    setCopied(false);
+    await api.createKey({ name, rateLimitRpm, budgetCents });
     setShowCreate(false);
     setName("");
     await load();
-  };
-
-  const copyReveal = async () => {
-    if (!plaintextReveal) return;
-    await navigator.clipboard.writeText(plaintextReveal);
-    setCopied(true);
   };
 
   const revoke = async (id: string) => {
@@ -43,17 +62,6 @@ export default function KeysListPage() {
         <h2>API Keys</h2>
         <button onClick={() => setShowCreate(true)}>Create key</button>
       </div>
-
-      {plaintextReveal && (
-        <div className="card">
-          <strong>Copy this key now — it will not be shown again:</strong>
-          <div className="plaintext-reveal-row">
-            <input className="plaintext-reveal" readOnly value={plaintextReveal} onFocus={(e) => e.target.select()} />
-            <button type="button" onClick={copyReveal}>{copied ? "Copied!" : "Copy"}</button>
-          </div>
-          <button onClick={() => setPlaintextReveal(null)}>Done</button>
-        </div>
-      )}
 
       {showCreate && (
         <form onSubmit={create} className="card">
@@ -84,7 +92,7 @@ export default function KeysListPage() {
           {keys.map((k) => (
             <tr key={k.id}>
               <td><Link to={`/keys/${k.id}`}>{k.name}</Link></td>
-              <td><code>{k.keyPrefix}…</code></td>
+              <td><KeyCell prefix={k.keyPrefix} fullKey={k.key} /></td>
               <td><span className={`badge ${k.status}`}>{k.status}</span></td>
               <td>{k.rateLimitRpm}</td>
               <td>{centsToDollars(k.budgetCents)}</td>

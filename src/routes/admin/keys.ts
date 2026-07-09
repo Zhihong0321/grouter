@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
 import { issueKey } from "../../lib/keyIssuance.js";
+import { encryptKey, decryptKey } from "../../lib/keyCrypto.js";
 import { invalidateKeyCache } from "../../lib/keyAuth.js";
 import { invalidateBudgetCache } from "../../lib/budget.js";
 import { requireAdmin } from "./auth.js";
@@ -23,6 +24,7 @@ function rowToDto(row: any) {
     id: row.id,
     name: row.name,
     keyPrefix: row.key_prefix,
+    key: row.key_ciphertext ? decryptKey(row.key_ciphertext) : null,
     status: row.status,
     rateLimitRpm: row.rate_limit_rpm,
     budgetCents: Number(row.budget_cents),
@@ -40,14 +42,15 @@ const keysRoutes: FastifyPluginAsync = async (app) => {
     const { name, rateLimitRpm = 60, budgetCents = 0, modelRestrictions = null } = request.body;
     const keyPrefix = await app.settingsCache.getKeyPrefix();
     const issued = issueKey(keyPrefix);
+    const ciphertext = encryptKey(issued.plaintext);
 
     const { rows } = await app.pg.query(
-      `INSERT INTO reseller_api_keys (name, key_hash, key_prefix, rate_limit_rpm, budget_cents, model_restrictions)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [name, issued.hash, issued.prefix, rateLimitRpm, budgetCents, modelRestrictions ? JSON.stringify(modelRestrictions) : null],
+      `INSERT INTO reseller_api_keys (name, key_hash, key_prefix, key_ciphertext, rate_limit_rpm, budget_cents, model_restrictions)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [name, issued.hash, issued.prefix, ciphertext, rateLimitRpm, budgetCents, modelRestrictions ? JSON.stringify(modelRestrictions) : null],
     );
 
-    reply.code(201).send({ ...rowToDto(rows[0]), plaintextKey: issued.plaintext });
+    reply.code(201).send(rowToDto(rows[0]));
   });
 
   app.get("/admin/api/keys", async () => {

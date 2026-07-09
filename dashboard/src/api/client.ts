@@ -18,6 +18,7 @@ export interface ApiKeyDto {
   id: string;
   name: string;
   keyPrefix: string;
+  key: string | null;
   status: "active" | "revoked";
   rateLimitRpm: number;
   budgetCents: number;
@@ -63,6 +64,14 @@ export interface SettingsDto {
   keyPrefix: string;
 }
 
+export interface SubrouterHealthDto {
+  ok: boolean;
+  statusCode?: number;
+  latencyMs: number;
+  modelCount?: number;
+  message: string;
+}
+
 export const api = {
   login: (email: string, password: string) => request<{ ok: true }>("/login", { method: "POST", body: JSON.stringify({ email, password }) }),
   logout: () => request<{ ok: true }>("/logout", { method: "POST" }),
@@ -71,7 +80,7 @@ export const api = {
   listKeys: () => request<ApiKeyDto[]>("/keys"),
   getKey: (id: string) => request<ApiKeyDto>(`/keys/${id}`),
   createKey: (body: { name: string; rateLimitRpm?: number; budgetCents?: number; modelRestrictions?: string[] | null }) =>
-    request<ApiKeyDto & { plaintextKey: string }>("/keys", { method: "POST", body: JSON.stringify(body) }),
+    request<ApiKeyDto>("/keys", { method: "POST", body: JSON.stringify(body) }),
   updateKey: (id: string, body: Partial<{ name: string; rateLimitRpm: number; budgetCents: number; modelRestrictions: string[] | null }>) =>
     request<ApiKeyDto>(`/keys/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   revokeKey: (id: string) => request<ApiKeyDto>(`/keys/${id}/revoke`, { method: "POST" }),
@@ -85,6 +94,8 @@ export const api = {
   getSettings: () => request<SettingsDto>("/settings"),
   updateSettings: (body: { subrouterApiKey?: string; subrouterBaseUrl?: string; keyPrefix?: string }) =>
     request<SettingsDto>("/settings", { method: "PATCH", body: JSON.stringify(body) }),
+  testSettings: (body: { subrouterApiKey?: string; subrouterBaseUrl?: string }) =>
+    request<SubrouterHealthDto>("/settings/test", { method: "POST", body: JSON.stringify(body) }),
 };
 
 export function centsToDollars(cents: number | string): string {
