@@ -56,6 +56,13 @@ export interface UsageResponse {
   recent: any[];
 }
 
+export interface SettingsDto {
+  subrouterApiKeyMasked: string | null;
+  subrouterConfigured: boolean;
+  subrouterBaseUrl: string | null;
+  keyPrefix: string;
+}
+
 export const api = {
   login: (email: string, password: string) => request<{ ok: true }>("/login", { method: "POST", body: JSON.stringify({ email, password }) }),
   logout: () => request<{ ok: true }>("/logout", { method: "POST" }),
@@ -74,6 +81,10 @@ export const api = {
   listPrices: () => request<ModelPriceDto[]>("/prices"),
   updatePrice: (modelId: string, body: Partial<ModelPriceDto>) =>
     request<ModelPriceDto>(`/prices/${modelId}`, { method: "PATCH", body: JSON.stringify(body) }),
+
+  getSettings: () => request<SettingsDto>("/settings"),
+  updateSettings: (body: { subrouterApiKey?: string; subrouterBaseUrl?: string; keyPrefix?: string }) =>
+    request<SettingsDto>("/settings", { method: "PATCH", body: JSON.stringify(body) }),
 };
 
 export function centsToDollars(cents: number | string): string {

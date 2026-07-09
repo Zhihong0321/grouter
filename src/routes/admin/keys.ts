@@ -38,7 +38,8 @@ const keysRoutes: FastifyPluginAsync = async (app) => {
 
   app.post<{ Body: CreateKeyBody }>("/admin/api/keys", async (request, reply) => {
     const { name, rateLimitRpm = 60, budgetCents = 0, modelRestrictions = null } = request.body;
-    const issued = issueKey();
+    const keyPrefix = await app.settingsCache.getKeyPrefix();
+    const issued = issueKey(keyPrefix);
 
     const { rows } = await app.pg.query(
       `INSERT INTO api_keys (name, key_hash, key_prefix, rate_limit_rpm, budget_cents, model_restrictions)

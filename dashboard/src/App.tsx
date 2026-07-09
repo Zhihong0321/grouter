@@ -5,6 +5,7 @@ import LoginPage from "./pages/LoginPage.js";
 import KeysListPage from "./pages/KeysListPage.js";
 import KeyDetailPage from "./pages/KeyDetailPage.js";
 import PriceTablePage from "./pages/PriceTablePage.js";
+import SettingsPage from "./pages/SettingsPage.js";
 
 export default function App() {
   const [authed, setAuthed] = useState<boolean | null>(null);
@@ -35,6 +36,7 @@ export default function App() {
       <nav className="nav">
         <Link to="/keys">Keys</Link>
         <Link to="/prices">Prices</Link>
+        <Link to="/settings">Settings</Link>
         <span style={{ marginLeft: "auto" }}>
           <button className="secondary" onClick={logout}>Log out</button>
         </span>
@@ -45,6 +47,7 @@ export default function App() {
           <Route path="/keys" element={<KeysListPage />} />
           <Route path="/keys/:id" element={<KeyDetailPage />} />
           <Route path="/prices" element={<PriceTablePage />} />
+          <Route path="/settings" element={<SettingsPage />} />
         </Routes>
       </div>
     </>

@@ -8,6 +8,7 @@ import fastifyStatic from "@fastify/static";
 import postgresPlugin from "./plugins/postgres.js";
 import redisPlugin from "./plugins/redis.js";
 import { PriceCache } from "./lib/pricing.js";
+import { SettingsCache } from "./lib/settings.js";
 import { env } from "./config/env.js";
 
 import healthRoutes from "./routes/health.js";
@@ -16,10 +17,12 @@ import authRoutes from "./routes/admin/auth.js";
 import keysRoutes from "./routes/admin/keys.js";
 import usageRoutes from "./routes/admin/usage.js";
 import pricesRoutes from "./routes/admin/prices.js";
+import settingsRoutes from "./routes/admin/settings.js";
 
 declare module "fastify" {
   interface FastifyInstance {
     priceCache: PriceCache;
+    settingsCache: SettingsCache;
   }
 }
 
@@ -33,6 +36,7 @@ export async function buildApp() {
   await app.register(redisPlugin);
 
   app.decorate("priceCache", new PriceCache(app.pg));
+  app.decorate("settingsCache", new SettingsCache(app.pg));
 
   await app.register(cookie);
   await app.register(session, {
@@ -46,6 +50,7 @@ export async function buildApp() {
   await app.register(keysRoutes);
   await app.register(usageRoutes);
   await app.register(pricesRoutes);
+  await app.register(settingsRoutes);
 
   // dashboard/dist only exists after `pnpm build:dashboard` has run. Guard so
   // the backend (and tests, and `pnpm dev`) still work standalone before

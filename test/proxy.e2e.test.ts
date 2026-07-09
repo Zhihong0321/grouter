@@ -5,11 +5,11 @@ import { createMockUpstream } from "./mockUpstream.js";
 
 // Env vars must be set before src/config/env.ts is ever imported (it parses
 // process.env eagerly at module load), so all app imports below are dynamic.
-process.env.SUBROUTER_API_KEY = "test-subrouter-key";
+// Note: the subrouter key/base URL/key prefix are no longer env vars -- they
+// live in the `settings` table and are seeded directly into Postgres below.
 process.env.DATABASE_URL = process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:55432/reseller";
 process.env.REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379";
 process.env.SESSION_SECRET = "test-session-secret-at-least-32-characters-long";
-process.env.KEY_PREFIX = "test";
 process.env.NODE_ENV = "test";
 
 function addressToUrl(address: ReturnType<FastifyInstance["server"]["address"]>): string {
@@ -27,7 +27,7 @@ describe("proxy e2e (requires local Postgres + Redis, see docker-compose.yml)", 
   beforeAll(async () => {
     mockUpstream = createMockUpstream();
     await mockUpstream.listen({ port: 0, host: "127.0.0.1" });
-    process.env.SUBROUTER_BASE_URL = addressToUrl(mockUpstream.server.address());
+    const mockUpstreamUrl = addressToUrl(mockUpstream.server.address());
 
     const { buildApp } = await import("../src/app.js");
     const { issueKey } = await import("../src/lib/keyIssuance.js");
@@ -36,7 +36,14 @@ describe("proxy e2e (requires local Postgres + Redis, see docker-compose.yml)", 
     await app.listen({ port: 0, host: "127.0.0.1" });
     appUrl = addressToUrl(app.server.address());
 
-    const issued = issueKey();
+    await app.pg.query(
+      `INSERT INTO settings (key, value) VALUES ('subrouter_api_key', 'test-subrouter-key'), ('subrouter_base_url', $1)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+      [mockUpstreamUrl],
+    );
+    await app.settingsCache.refresh();
+
+    const issued = issueKey("test");
     plaintextKey = issued.plaintext;
     const { rows } = await app.pg.query(
       `INSERT INTO api_keys (name, key_hash, key_prefix, rate_limit_rpm, budget_cents) VALUES ($1,$2,$3,$4,$5) RETURNING id`,

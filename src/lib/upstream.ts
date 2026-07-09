@@ -1,8 +1,12 @@
 import type { ServerResponse } from "node:http";
 import { createParser, type EventSourceMessage } from "eventsource-parser";
-import { env } from "../config/env.js";
 import { StreamingUsageAccumulator, extractUsage } from "./usageExtract.js";
 import type { CapturedUsage } from "../types/anthropic.js";
+
+export interface SubrouterConfig {
+  apiKey: string;
+  baseUrl: string;
+}
 
 const HOP_BY_HOP_HEADERS = new Set([
   "connection",
@@ -18,13 +22,17 @@ export interface UpstreamCallResult {
 }
 
 /** Forwards the client's request body upstream using the real subrouter key. The client's own key is never forwarded. */
-export async function callUpstream(body: unknown, anthropicVersion: string | undefined): Promise<UpstreamCallResult> {
+export async function callUpstream(
+  subrouter: SubrouterConfig,
+  body: unknown,
+  anthropicVersion: string | undefined,
+): Promise<UpstreamCallResult> {
   const latencyStartMs = Date.now();
-  const response = await fetch(`${env.SUBROUTER_BASE_URL}/v1/messages`, {
+  const response = await fetch(`${subrouter.baseUrl}/v1/messages`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "x-api-key": env.SUBROUTER_API_KEY,
+      "x-api-key": subrouter.apiKey,
       "anthropic-version": anthropicVersion ?? "2023-06-01",
     },
     body: JSON.stringify(body),

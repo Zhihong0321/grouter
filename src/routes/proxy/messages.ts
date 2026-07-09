@@ -45,8 +45,14 @@ const proxyRoutes: FastifyPluginAsync = async (app) => {
       return sendAnthropicError(reply, "billing_error", "Budget exhausted for this API key");
     }
 
+    const subrouter = await app.settingsCache.getSubrouterConfig();
+    if (!subrouter) {
+      return sendAnthropicError(reply, "billing_error", "Upstream is not configured yet -- set it in /admin");
+    }
+
     const anthropicVersion = request.headers["anthropic-version"];
     const { response, latencyStartMs } = await callUpstream(
+      subrouter,
       body,
       typeof anthropicVersion === "string" ? anthropicVersion : undefined,
     );
