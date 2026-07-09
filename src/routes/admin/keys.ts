@@ -42,7 +42,7 @@ const keysRoutes: FastifyPluginAsync = async (app) => {
     const issued = issueKey(keyPrefix);
 
     const { rows } = await app.pg.query(
-      `INSERT INTO api_keys (name, key_hash, key_prefix, rate_limit_rpm, budget_cents, model_restrictions)
+      `INSERT INTO reseller_api_keys (name, key_hash, key_prefix, rate_limit_rpm, budget_cents, model_restrictions)
        VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
       [name, issued.hash, issued.prefix, rateLimitRpm, budgetCents, modelRestrictions ? JSON.stringify(modelRestrictions) : null],
     );
@@ -51,18 +51,18 @@ const keysRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.get("/admin/api/keys", async () => {
-    const { rows } = await app.pg.query("SELECT * FROM api_keys ORDER BY created_at DESC");
+    const { rows } = await app.pg.query("SELECT * FROM reseller_api_keys ORDER BY created_at DESC");
     return rows.map(rowToDto);
   });
 
   app.get<{ Params: { id: string } }>("/admin/api/keys/:id", async (request, reply) => {
-    const { rows } = await app.pg.query("SELECT * FROM api_keys WHERE id = $1", [request.params.id]);
+    const { rows } = await app.pg.query("SELECT * FROM reseller_api_keys WHERE id = $1", [request.params.id]);
     if (rows.length === 0) return reply.code(404).send({ error: "Not found" });
     return rowToDto(rows[0]);
   });
 
   app.patch<{ Params: { id: string }; Body: UpdateKeyBody }>("/admin/api/keys/:id", async (request, reply) => {
-    const { rows: existingRows } = await app.pg.query("SELECT * FROM api_keys WHERE id = $1", [request.params.id]);
+    const { rows: existingRows } = await app.pg.query("SELECT * FROM reseller_api_keys WHERE id = $1", [request.params.id]);
     if (existingRows.length === 0) return reply.code(404).send({ error: "Not found" });
 
     const current = existingRows[0];
@@ -70,7 +70,7 @@ const keysRoutes: FastifyPluginAsync = async (app) => {
     const restrictions = modelRestrictions === undefined ? current.model_restrictions : modelRestrictions;
 
     const { rows } = await app.pg.query(
-      `UPDATE api_keys SET name = $1, rate_limit_rpm = $2, budget_cents = $3, model_restrictions = $4
+      `UPDATE reseller_api_keys SET name = $1, rate_limit_rpm = $2, budget_cents = $3, model_restrictions = $4
        WHERE id = $5 RETURNING *`,
       [name, rateLimitRpm, budgetCents, restrictions ? JSON.stringify(restrictions) : null, request.params.id],
     );
@@ -83,7 +83,7 @@ const keysRoutes: FastifyPluginAsync = async (app) => {
 
   app.post<{ Params: { id: string } }>("/admin/api/keys/:id/revoke", async (request, reply) => {
     const { rows } = await app.pg.query(
-      "UPDATE api_keys SET status = 'revoked', revoked_at = now() WHERE id = $1 RETURNING *",
+      "UPDATE reseller_api_keys SET status = 'revoked', revoked_at = now() WHERE id = $1 RETURNING *",
       [request.params.id],
     );
     if (rows.length === 0) return reply.code(404).send({ error: "Not found" });

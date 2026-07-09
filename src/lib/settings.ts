@@ -20,7 +20,7 @@ export class SettingsCache {
   constructor(private pg: Pool) {}
 
   async refresh(): Promise<void> {
-    const { rows } = await this.pg.query("SELECT key, value FROM settings");
+    const { rows } = await this.pg.query("SELECT key, value FROM reseller_settings");
     this.cache = new Map(rows.map((r) => [r.key, r.value]));
     this.lastRefresh = Date.now();
   }
@@ -55,7 +55,7 @@ export class SettingsCache {
 
   async set(pg: Pool, key: string, value: string): Promise<void> {
     await pg.query(
-      `INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, now())
+      `INSERT INTO reseller_settings (key, value, updated_at) VALUES ($1, $2, now())
        ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = now()`,
       [key, value],
     );

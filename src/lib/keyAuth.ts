@@ -33,7 +33,7 @@ export async function lookupKeyByHash(pg: Pool, redis: Redis, hash: string): Pro
     return JSON.parse(cached) as ApiKeyRecord;
   }
 
-  const { rows } = await pg.query("SELECT * FROM api_keys WHERE key_hash = $1", [hash]);
+  const { rows } = await pg.query("SELECT * FROM reseller_api_keys WHERE key_hash = $1", [hash]);
   if (rows.length === 0) return null;
 
   const record = rowToRecord(rows[0]);

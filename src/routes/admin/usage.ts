@@ -26,7 +26,7 @@ const usageRoutes: FastifyPluginAsync = async (app) => {
            COALESCE(SUM(cache_read_cost_cents), 0) AS cache_read_cost_cents,
            COALESCE(SUM(cost_cents), 0) AS cost_cents,
            COUNT(*) AS request_count
-         FROM usage_logs
+         FROM reseller_usage_logs
          WHERE key_id = $1 AND created_at >= now() - ($2 || ' days')::interval`,
         [request.params.id, days],
       );
@@ -35,14 +35,14 @@ const usageRoutes: FastifyPluginAsync = async (app) => {
         `SELECT date_trunc('day', created_at) AS day,
                 COALESCE(SUM(cost_cents), 0) AS cost_cents,
                 COALESCE(SUM(input_tokens + output_tokens + cache_creation_input_tokens + cache_read_input_tokens), 0) AS total_tokens
-         FROM usage_logs
+         FROM reseller_usage_logs
          WHERE key_id = $1 AND created_at >= now() - ($2 || ' days')::interval
          GROUP BY day ORDER BY day ASC`,
         [request.params.id, days],
       );
 
       const { rows: recent } = await app.pg.query(
-        `SELECT * FROM usage_logs WHERE key_id = $1 ORDER BY created_at DESC LIMIT 50`,
+        `SELECT * FROM reseller_usage_logs WHERE key_id = $1 ORDER BY created_at DESC LIMIT 50`,
         [request.params.id],
       );
 
@@ -53,7 +53,7 @@ const usageRoutes: FastifyPluginAsync = async (app) => {
   app.get("/admin/api/usage/summary", async () => {
     const { rows } = await app.pg.query(
       `SELECT COUNT(*) AS request_count, COALESCE(SUM(cost_cents), 0) AS cost_cents
-       FROM usage_logs WHERE created_at >= now() - interval '30 days'`,
+       FROM reseller_usage_logs WHERE created_at >= now() - interval '30 days'`,
     );
     return rows[0];
   });

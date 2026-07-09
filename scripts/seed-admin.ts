@@ -11,13 +11,13 @@ if (!email || !password) {
 
 const pg = new Pool({ connectionString: process.env.DATABASE_URL });
 
-const { rows } = await pg.query("SELECT id FROM admin_users WHERE email = $1", [email]);
+const { rows } = await pg.query("SELECT id FROM reseller_admin_users WHERE email = $1", [email]);
 if (rows.length > 0) {
   console.log(`Admin user ${email} already exists (id=${rows[0].id}), skipping.`);
 } else {
   const passwordHash = await bcrypt.hash(password, 12);
   const result = await pg.query(
-    "INSERT INTO admin_users (email, password_hash) VALUES ($1, $2) RETURNING id",
+    "INSERT INTO reseller_admin_users (email, password_hash) VALUES ($1, $2) RETURNING id",
     [email, passwordHash],
   );
   console.log(`Created admin user ${email} (id=${result.rows[0].id}).`);

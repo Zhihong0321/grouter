@@ -70,7 +70,7 @@ const debugRoutes: FastifyPluginAsync = async (app) => {
 
     // Settings table
     try {
-      const { rows } = await pgQuery(app.pg, "SELECT key, value FROM settings ORDER BY key");
+      const { rows } = await pgQuery(app.pg, "SELECT key, value FROM reseller_settings ORDER BY key");
       const settingsMap = Object.fromEntries(rows.map((r: any) => [r.key, r.value]));
       const subrouterKey = settingsMap[SETTINGS_KEYS.SUBROUTER_API_KEY] as string | undefined;
       const subrouterUrl = settingsMap[SETTINGS_KEYS.SUBROUTER_BASE_URL] as string | undefined;
@@ -84,12 +84,13 @@ const debugRoutes: FastifyPluginAsync = async (app) => {
       result.settings = { error: err?.message };
     }
 
-    // Tables existence check
+    // Tables existence check -- this database is shared with other apps, so
+    // only list our own (reseller_-prefixed) tables rather than everything.
     try {
       const { rows } = await pgQuery(
         app.pg,
         `SELECT table_name FROM information_schema.tables
-         WHERE table_schema = 'public' ORDER BY table_name`,
+         WHERE table_schema = 'public' AND table_name LIKE 'reseller_%' ORDER BY table_name`,
       );
       result.tables = rows.map((r: any) => r.table_name);
     } catch (err: any) {
@@ -98,7 +99,7 @@ const debugRoutes: FastifyPluginAsync = async (app) => {
 
     // API keys count
     try {
-      const { rows } = await pgQuery(app.pg, "SELECT status, COUNT(*) as n FROM api_keys GROUP BY status");
+      const { rows } = await pgQuery(app.pg, "SELECT status, COUNT(*) as n FROM reseller_api_keys GROUP BY status");
       result.api_keys = Object.fromEntries(rows.map((r: any) => [r.status, Number(r.n)]));
     } catch (err: any) {
       result.api_keys = { error: err?.message };

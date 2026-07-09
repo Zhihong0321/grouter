@@ -8,7 +8,7 @@ function remainingKeyFor(keyId: string): string {
 }
 
 async function loadRemainingFromPg(pg: Pool, keyId: string): Promise<number> {
-  const { rows } = await pg.query("SELECT budget_cents - spent_cents AS remaining FROM api_keys WHERE id = $1", [keyId]);
+  const { rows } = await pg.query("SELECT budget_cents - spent_cents AS remaining FROM reseller_api_keys WHERE id = $1", [keyId]);
   return rows.length > 0 ? Number(rows[0].remaining) : 0;
 }
 

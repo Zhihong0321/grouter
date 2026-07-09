@@ -16,7 +16,7 @@ export async function requireAdmin(request: FastifyRequest, reply: FastifyReply)
 const authRoutes: FastifyPluginAsync = async (app) => {
   app.post<{ Body: { email: string; password: string } }>("/admin/api/login", async (request, reply) => {
     const { email, password } = request.body;
-    const { rows } = await app.pg.query("SELECT * FROM admin_users WHERE email = $1", [email]);
+    const { rows } = await app.pg.query("SELECT * FROM reseller_admin_users WHERE email = $1", [email]);
     if (rows.length === 0) {
       return reply.code(401).send({ error: "Invalid credentials" });
     }

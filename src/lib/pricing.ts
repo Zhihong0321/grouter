@@ -46,7 +46,7 @@ export class PriceCache {
   constructor(private pg: Pool) {}
 
   async refresh(): Promise<void> {
-    const { rows } = await this.pg.query("SELECT * FROM model_prices");
+    const { rows } = await this.pg.query("SELECT * FROM reseller_model_prices");
     this.cache = new Map(rows.map((r) => [r.model_id, rowToModelPrice(r)]));
     this.lastRefresh = Date.now();
   }

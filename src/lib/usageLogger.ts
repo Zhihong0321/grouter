@@ -37,7 +37,7 @@ export async function logUsage(
   const cost = computeCostCents(params.usage, price);
 
   await pg.query(
-    `INSERT INTO usage_logs (
+    `INSERT INTO reseller_usage_logs (
       key_id, model,
       input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens,
       input_cost_cents, output_cost_cents, cache_write_cost_cents, cache_read_cost_cents, cost_cents,
@@ -61,6 +61,6 @@ export async function logUsage(
     ],
   );
 
-  await pg.query("UPDATE api_keys SET spent_cents = spent_cents + $1 WHERE id = $2", [cost.totalCostCents, params.keyId]);
+  await pg.query("UPDATE reseller_api_keys SET spent_cents = spent_cents + $1 WHERE id = $2", [cost.totalCostCents, params.keyId]);
   await decrementBudget(redis, params.keyId, cost.totalCostCents);
 }

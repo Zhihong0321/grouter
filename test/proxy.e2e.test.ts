@@ -37,7 +37,7 @@ describe("proxy e2e (requires local Postgres + Redis, see docker-compose.yml)", 
     appUrl = addressToUrl(app.server.address());
 
     await app.pg.query(
-      `INSERT INTO settings (key, value) VALUES ('subrouter_api_key', 'test-subrouter-key'), ('subrouter_base_url', $1)
+      `INSERT INTO reseller_settings (key, value) VALUES ('subrouter_api_key', 'test-subrouter-key'), ('subrouter_base_url', $1)
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
       [mockUpstreamUrl],
     );
@@ -46,7 +46,7 @@ describe("proxy e2e (requires local Postgres + Redis, see docker-compose.yml)", 
     const issued = issueKey("test");
     plaintextKey = issued.plaintext;
     const { rows } = await app.pg.query(
-      `INSERT INTO api_keys (name, key_hash, key_prefix, rate_limit_rpm, budget_cents) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+      `INSERT INTO reseller_api_keys (name, key_hash, key_prefix, rate_limit_rpm, budget_cents) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
       ["e2e-test-client", issued.hash, issued.prefix, 1000, 100_000],
     );
     keyId = rows[0].id;
@@ -54,8 +54,8 @@ describe("proxy e2e (requires local Postgres + Redis, see docker-compose.yml)", 
 
   afterAll(async () => {
     if (keyId) {
-      await app.pg.query("DELETE FROM usage_logs WHERE key_id = $1", [keyId]);
-      await app.pg.query("DELETE FROM api_keys WHERE id = $1", [keyId]);
+      await app.pg.query("DELETE FROM reseller_usage_logs WHERE key_id = $1", [keyId]);
+      await app.pg.query("DELETE FROM reseller_api_keys WHERE id = $1", [keyId]);
     }
     await app.close();
     await mockUpstream.close();
@@ -118,7 +118,7 @@ describe("proxy e2e (requires local Postgres + Redis, see docker-compose.yml)", 
   });
 
   it("rejects requests past the per-key rate limit", async () => {
-    await app.pg.query("UPDATE api_keys SET rate_limit_rpm = 2 WHERE id = $1", [keyId]);
+    await app.pg.query("UPDATE reseller_api_keys SET rate_limit_rpm = 2 WHERE id = $1", [keyId]);
     await app.redis.del(`key:${createHash("sha256").update(plaintextKey).digest("hex")}`);
 
     const call = () =>
@@ -137,7 +137,7 @@ describe("proxy e2e (requires local Postgres + Redis, see docker-compose.yml)", 
 async function pollForUsageLog(app: FastifyInstance, keyId: string, mockUsage: Record<string, number>, stream = false) {
   for (let i = 0; i < 20; i++) {
     const { rows } = await app.pg.query(
-      "SELECT * FROM usage_logs WHERE key_id = $1 AND stream = $2 ORDER BY created_at DESC LIMIT 1",
+      "SELECT * FROM reseller_usage_logs WHERE key_id = $1 AND stream = $2 ORDER BY created_at DESC LIMIT 1",
       [keyId, stream],
     );
     if (rows.length > 0 && rows[0].input_tokens === mockUsage.input_tokens) return rows[0];

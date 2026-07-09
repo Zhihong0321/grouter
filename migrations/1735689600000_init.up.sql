@@ -1,13 +1,13 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
-CREATE TABLE admin_users (
+CREATE TABLE reseller_admin_users (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   email text NOT NULL UNIQUE,
   password_hash text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE api_keys (
+CREATE TABLE reseller_api_keys (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name text NOT NULL,
   key_hash text NOT NULL UNIQUE,
@@ -20,9 +20,9 @@ CREATE TABLE api_keys (
   created_at timestamptz NOT NULL DEFAULT now(),
   revoked_at timestamptz
 );
-CREATE INDEX idx_api_keys_key_hash ON api_keys (key_hash);
+CREATE INDEX idx_reseller_api_keys_key_hash ON reseller_api_keys (key_hash);
 
-CREATE TABLE model_prices (
+CREATE TABLE reseller_model_prices (
   model_id text PRIMARY KEY,
   input_price_cents_per_million numeric NOT NULL CHECK (input_price_cents_per_million >= 0),
   output_price_cents_per_million numeric NOT NULL CHECK (output_price_cents_per_million >= 0),
@@ -32,9 +32,9 @@ CREATE TABLE model_prices (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE usage_logs (
+CREATE TABLE reseller_usage_logs (
   id bigserial PRIMARY KEY,
-  key_id uuid NOT NULL REFERENCES api_keys(id),
+  key_id uuid NOT NULL REFERENCES reseller_api_keys(id),
   model text NOT NULL,
 
   input_tokens int NOT NULL DEFAULT 0,
@@ -53,12 +53,12 @@ CREATE TABLE usage_logs (
   stream boolean NOT NULL DEFAULT false,
   created_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX idx_usage_logs_key_created ON usage_logs (key_id, created_at);
+CREATE INDEX idx_reseller_usage_logs_key_created ON reseller_usage_logs (key_id, created_at);
 
 -- Seed a starting price table: base = public Anthropic list pricing, cache
 -- write/read derived at the standard ~1.25x / ~0.1x ratios. All editable via
 -- the admin dashboard afterward -- this is just a sane starting point.
-INSERT INTO model_prices (model_id, input_price_cents_per_million, output_price_cents_per_million, cache_write_price_cents_per_million, cache_read_price_cents_per_million) VALUES
+INSERT INTO reseller_model_prices (model_id, input_price_cents_per_million, output_price_cents_per_million, cache_write_price_cents_per_million, cache_read_price_cents_per_million) VALUES
   ('claude-opus-4-8',   500, 2500, 625, 50),
   ('claude-sonnet-5',   300, 1500, 375, 30),
   ('claude-haiku-4-5',  100,  500, 125, 10),

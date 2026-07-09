@@ -25,14 +25,14 @@ const pricesRoutes: FastifyPluginAsync = async (app) => {
   app.addHook("preHandler", requireAdmin);
 
   app.get("/admin/api/prices", async () => {
-    const { rows } = await app.pg.query("SELECT * FROM model_prices ORDER BY model_id ASC");
+    const { rows } = await app.pg.query("SELECT * FROM reseller_model_prices ORDER BY model_id ASC");
     return rows.map(rowToDto);
   });
 
   app.patch<{ Params: { modelId: string }; Body: UpdatePriceBody }>(
     "/admin/api/prices/:modelId",
     async (request, reply) => {
-      const { rows: existingRows } = await app.pg.query("SELECT * FROM model_prices WHERE model_id = $1", [request.params.modelId]);
+      const { rows: existingRows } = await app.pg.query("SELECT * FROM reseller_model_prices WHERE model_id = $1", [request.params.modelId]);
       if (existingRows.length === 0) return reply.code(404).send({ error: "Not found" });
 
       const current = existingRows[0];
@@ -45,7 +45,7 @@ const pricesRoutes: FastifyPluginAsync = async (app) => {
       } = request.body;
 
       const { rows } = await app.pg.query(
-        `UPDATE model_prices SET
+        `UPDATE reseller_model_prices SET
            input_price_cents_per_million = $1,
            output_price_cents_per_million = $2,
            cache_write_price_cents_per_million = $3,
