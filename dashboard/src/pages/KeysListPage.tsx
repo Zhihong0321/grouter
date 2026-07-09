@@ -6,6 +6,7 @@ export default function KeysListPage() {
   const [keys, setKeys] = useState<ApiKeyDto[]>([]);
   const [showCreate, setShowCreate] = useState(false);
   const [plaintextReveal, setPlaintextReveal] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const [name, setName] = useState("");
   const [rateLimitRpm, setRateLimitRpm] = useState(60);
@@ -18,9 +19,16 @@ export default function KeysListPage() {
     e.preventDefault();
     const created = await api.createKey({ name, rateLimitRpm, budgetCents });
     setPlaintextReveal(created.plaintextKey);
+    setCopied(false);
     setShowCreate(false);
     setName("");
     await load();
+  };
+
+  const copyReveal = async () => {
+    if (!plaintextReveal) return;
+    await navigator.clipboard.writeText(plaintextReveal);
+    setCopied(true);
   };
 
   const revoke = async (id: string) => {
@@ -39,7 +47,10 @@ export default function KeysListPage() {
       {plaintextReveal && (
         <div className="card">
           <strong>Copy this key now — it will not be shown again:</strong>
-          <p className="plaintext-reveal">{plaintextReveal}</p>
+          <div className="plaintext-reveal-row">
+            <input className="plaintext-reveal" readOnly value={plaintextReveal} onFocus={(e) => e.target.select()} />
+            <button type="button" onClick={copyReveal}>{copied ? "Copied!" : "Copy"}</button>
+          </div>
           <button onClick={() => setPlaintextReveal(null)}>Done</button>
         </div>
       )}
