@@ -10,7 +10,7 @@ declare module "fastify" {
 }
 
 const redisPlugin: FastifyPluginAsync = async (app) => {
-  const redis = new Redis(env.REDIS_URL, { maxRetriesPerRequest: null });
+  const redis = new Redis(env.REDIS_URL, { maxRetriesPerRequest: 3, connectTimeout: 5000 });
   app.decorate("redis", redis);
   app.addHook("onClose", async () => {
     redis.disconnect();
