@@ -66,6 +66,10 @@ export async function buildApp() {
     });
   }
 
+  app.get("/", async (request, reply) => {
+    return reply.redirect(dashboardBuilt ? "/admin/" : "/healthz");
+  });
+
   app.setNotFoundHandler((request, reply) => {
     if (dashboardBuilt && request.method === "GET" && request.url.startsWith("/admin") && !request.url.startsWith("/admin/api")) {
       return reply.sendFile("index.html");
