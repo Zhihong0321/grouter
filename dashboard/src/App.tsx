@@ -15,6 +15,12 @@ export default function App() {
     api.me().then(() => setAuthed(true)).catch(() => setAuthed(false));
   }, []);
 
+  useEffect(() => {
+    const onUnauthenticated = () => setAuthed(false);
+    window.addEventListener("admin-unauthenticated", onUnauthenticated);
+    return () => window.removeEventListener("admin-unauthenticated", onUnauthenticated);
+  }, []);
+
   if (authed === null) return null;
 
   if (!authed) {

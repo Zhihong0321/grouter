@@ -21,6 +21,65 @@ export interface UpstreamCallResult {
   latencyStartMs: number;
 }
 
+export interface SubrouterHealthResult {
+  ok: boolean;
+  statusCode?: number;
+  latencyMs: number;
+  modelCount?: number;
+  message: string;
+}
+
+/**
+ * Verifies a subrouter key/base URL actually work, without spending any
+ * tokens: GET /v1/models is a metadata lookup on the real Anthropic API
+ * surface (auth + routing only), never a completion, so it's a true
+ * zero-cost smoke test for provider health.
+ */
+export async function checkSubrouterHealth(subrouter: SubrouterConfig): Promise<SubrouterHealthResult> {
+  const start = Date.now();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
+
+  try {
+    const response = await fetch(`${subrouter.baseUrl}/v1/models`, {
+      method: "GET",
+      headers: {
+        "x-api-key": subrouter.apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      signal: controller.signal,
+    });
+    const latencyMs = Date.now() - start;
+    const json = (await response.json().catch(() => undefined)) as { error?: { message?: string }; data?: unknown[] } | undefined;
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        statusCode: response.status,
+        latencyMs,
+        message: json?.error?.message ?? `Upstream returned ${response.status}`,
+      };
+    }
+
+    return {
+      ok: true,
+      statusCode: response.status,
+      latencyMs,
+      modelCount: Array.isArray(json?.data) ? json.data.length : undefined,
+      message: "Provider key is valid",
+    };
+  } catch (err) {
+    const timedOut = err instanceof Error && err.name === "AbortError";
+    return {
+      ok: false,
+      latencyMs: Date.now() - start,
+      message: timedOut ? "Timed out after 10s" : err instanceof Error ? err.message : "Unknown error",
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 /** Forwards the client's request body upstream using the real subrouter key. The client's own key is never forwarded. */
 export async function callUpstream(
   subrouter: SubrouterConfig,

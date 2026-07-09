@@ -9,6 +9,7 @@ import postgresPlugin from "./plugins/postgres.js";
 import redisPlugin from "./plugins/redis.js";
 import { PriceCache } from "./lib/pricing.js";
 import { SettingsCache } from "./lib/settings.js";
+import { RedisSessionStore } from "./lib/sessionStore.js";
 import { env } from "./config/env.js";
 
 import healthRoutes from "./routes/health.js";
@@ -39,10 +40,15 @@ export async function buildApp() {
   app.decorate("priceCache", new PriceCache(app.pg));
   app.decorate("settingsCache", new SettingsCache(app.pg));
 
+  const sessionMaxAgeMs = 1000 * 60 * 60 * 12;
   await app.register(cookie);
   await app.register(session, {
     secret: env.SESSION_SECRET,
-    cookie: { secure: env.NODE_ENV === "production", maxAge: 1000 * 60 * 60 * 12 },
+    // @fastify/session defaults to an in-memory store, which its own docs
+    // warn against in production: it's wiped on every process restart, so
+    // every deploy would otherwise silently log out every admin.
+    store: new RedisSessionStore(app.redis, sessionMaxAgeMs / 1000),
+    cookie: { secure: env.NODE_ENV === "production", maxAge: sessionMaxAgeMs },
   });
 
   await app.register(healthRoutes);

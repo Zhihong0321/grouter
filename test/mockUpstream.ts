@@ -16,6 +16,22 @@ interface MockUsage {
 export function createMockUpstream(): FastifyInstance {
   const app = Fastify({ logger: false });
 
+  // Real Anthropic-shaped model list -- used by the zero-cost provider
+  // health check (GET /v1/models never creates a message, so it never
+  // consumes tokens).
+  app.get("/v1/models", async (request, reply) => {
+    if (request.headers["x-api-key"] !== "test-subrouter-key") {
+      return reply.code(401).send({ type: "error", error: { type: "authentication_error", message: "invalid x-api-key" } });
+    }
+    return reply.send({
+      data: [
+        { id: "claude-haiku-4-5", type: "model" },
+        { id: "claude-sonnet-5", type: "model" },
+      ],
+      has_more: false,
+    });
+  });
+
   app.post("/v1/messages", async (request, reply) => {
     const body = request.body as any;
     // `mock_usage` is not a real Anthropic field -- the proxy forwards the

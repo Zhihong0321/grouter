@@ -1,11 +1,17 @@
 import type { FastifyPluginAsync } from "fastify";
 import { requireAdmin } from "./auth.js";
 import { SETTINGS_KEYS } from "../../lib/settings.js";
+import { checkSubrouterHealth } from "../../lib/upstream.js";
 
 interface UpdateSettingsBody {
   subrouterApiKey?: string;
   subrouterBaseUrl?: string;
   keyPrefix?: string;
+}
+
+interface TestSettingsBody {
+  subrouterApiKey?: string;
+  subrouterBaseUrl?: string;
 }
 
 function mask(value: string | undefined): string | null {
@@ -53,6 +59,24 @@ const settingsRoutes: FastifyPluginAsync = async (app) => {
       subrouterBaseUrl: baseUrl ?? null,
       keyPrefix: await app.settingsCache.getKeyPrefix(),
     };
+  });
+
+  // Zero-cost provider health check: GET /v1/models on the subrouter, never
+  // /v1/messages, so testing a key (or re-testing the saved one) never
+  // spends tokens. Body fields let the dashboard test an unsaved key/URL
+  // before committing them; omitted fields fall back to what's stored.
+  app.post<{ Body: TestSettingsBody }>("/admin/api/settings/test", async (request) => {
+    const storedApiKey = await app.settingsCache.get(SETTINGS_KEYS.SUBROUTER_API_KEY);
+    const storedBaseUrl = await app.settingsCache.get(SETTINGS_KEYS.SUBROUTER_BASE_URL);
+
+    const apiKey = request.body?.subrouterApiKey || storedApiKey;
+    const baseUrl = request.body?.subrouterBaseUrl || storedBaseUrl;
+
+    if (!apiKey || !baseUrl) {
+      return { ok: false, latencyMs: 0, message: "Set an API key and base URL first" };
+    }
+
+    return checkSubrouterHealth({ apiKey, baseUrl });
   });
 };
 

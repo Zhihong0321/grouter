@@ -1,11 +1,19 @@
 const BASE = "/admin/api";
 
+// A session can die mid-browse (expiry, or the server restarting on deploy
+// since sessions aren't preserved across process restarts). Every page's API
+// calls funnel through here, so this is the one place to catch that and kick
+// the SPA back to the login screen instead of leaving a page stuck on
+// "Loading..." with an unhandled rejection in the console.
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...options,
     credentials: "include",
     headers: { "Content-Type": "application/json", ...options.headers },
   });
+  if (res.status === 401 && path !== "/me") {
+    window.dispatchEvent(new Event("admin-unauthenticated"));
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(body.error ?? `Request failed: ${res.status}`);
