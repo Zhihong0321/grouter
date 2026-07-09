@@ -2,10 +2,14 @@ import type { ServerResponse } from "node:http";
 import { createParser, type EventSourceMessage } from "eventsource-parser";
 import { StreamingUsageAccumulator, extractUsage } from "./usageExtract.js";
 import type { CapturedUsage } from "../types/anthropic.js";
+import type { ProviderStandard } from "../types/router.js";
 
-export interface SubrouterConfig {
-  apiKey: string;
+/** A single resolved upstream call target: which provider, and which model ID it expects. */
+export interface ProviderTarget {
+  standard: ProviderStandard;
   baseUrl: string;
+  apiKey: string;
+  upstreamModelId: string;
 }
 
 const HOP_BY_HOP_HEADERS = new Set([
@@ -21,7 +25,7 @@ export interface UpstreamCallResult {
   latencyStartMs: number;
 }
 
-export interface SubrouterHealthResult {
+export interface ProviderHealthResult {
   ok: boolean;
   statusCode?: number;
   latencyMs: number;
@@ -29,24 +33,39 @@ export interface SubrouterHealthResult {
   message: string;
 }
 
+// Bounds only the connect + response-headers phase of an upstream call (the
+// fetch() promise resolves once headers arrive, before the body streams) --
+// long-running streamed generations are never cut short by this.
+const UPSTREAM_CONNECT_TIMEOUT_MS = 60_000;
+
+function authHeaders(target: Pick<ProviderTarget, "standard" | "apiKey">, anthropicVersion?: string): Record<string, string> {
+  if (target.standard === "anthropic") {
+    return { "x-api-key": target.apiKey, "anthropic-version": anthropicVersion ?? "2023-06-01" };
+  }
+  // openai-standard support is deferred -- see implemenation_plan_0709.md §13.
+  throw new Error(`Unsupported provider standard: ${target.standard}`);
+}
+
+function messagesPath(target: Pick<ProviderTarget, "standard" | "baseUrl">): string {
+  if (target.standard === "anthropic") return `${target.baseUrl}/v1/messages`;
+  throw new Error(`Unsupported provider standard: ${target.standard}`);
+}
+
 /**
- * Verifies a subrouter key/base URL actually work, without spending any
+ * Verifies a provider's key/base URL actually work, without spending any
  * tokens: GET /v1/models is a metadata lookup on the real Anthropic API
  * surface (auth + routing only), never a completion, so it's a true
  * zero-cost smoke test for provider health.
  */
-export async function checkSubrouterHealth(subrouter: SubrouterConfig): Promise<SubrouterHealthResult> {
+export async function checkProviderHealth(target: { standard: ProviderStandard; baseUrl: string; apiKey: string }): Promise<ProviderHealthResult> {
   const start = Date.now();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10_000);
 
   try {
-    const response = await fetch(`${subrouter.baseUrl}/v1/models`, {
+    const response = await fetch(`${target.baseUrl}/v1/models`, {
       method: "GET",
-      headers: {
-        "x-api-key": subrouter.apiKey,
-        "anthropic-version": "2023-06-01",
-      },
+      headers: authHeaders(target),
       signal: controller.signal,
     });
     const latencyMs = Date.now() - start;
@@ -80,23 +99,31 @@ export async function checkSubrouterHealth(subrouter: SubrouterConfig): Promise<
   }
 }
 
-/** Forwards the client's request body upstream using the real subrouter key. The client's own key is never forwarded. */
+/**
+ * Forwards the client's request body to a single resolved provider, rewriting
+ * `model` to whatever ID that supplier expects. The client's own issued key
+ * is never forwarded -- only the provider's real key.
+ */
 export async function callUpstream(
-  subrouter: SubrouterConfig,
-  body: unknown,
+  target: ProviderTarget,
+  body: Record<string, unknown>,
   anthropicVersion: string | undefined,
 ): Promise<UpstreamCallResult> {
   const latencyStartMs = Date.now();
-  const response = await fetch(`${subrouter.baseUrl}/v1/messages`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": subrouter.apiKey,
-      "anthropic-version": anthropicVersion ?? "2023-06-01",
-    },
-    body: JSON.stringify(body),
-  });
-  return { response, latencyStartMs };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), UPSTREAM_CONNECT_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(messagesPath(target), {
+      method: "POST",
+      headers: { "content-type": "application/json", ...authHeaders(target, anthropicVersion) },
+      body: JSON.stringify({ ...body, model: target.upstreamModelId }),
+      signal: controller.signal,
+    });
+    return { response, latencyStartMs };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export function forwardResponseHeaders(response: Response, rawRes: ServerResponse): void {

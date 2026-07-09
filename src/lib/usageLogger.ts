@@ -12,6 +12,8 @@ export interface LogUsageParams {
   latencyMs: number;
   statusCode: number;
   stream: boolean;
+  providerId?: string;
+  upstreamModelId?: string;
 }
 
 /**
@@ -41,8 +43,8 @@ export async function logUsage(
       key_id, model,
       input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens,
       input_cost_cents, output_cost_cents, cache_write_cost_cents, cache_read_cost_cents, cost_cents,
-      latency_ms, status_code, stream
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+      latency_ms, status_code, stream, provider_id, upstream_model_id
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
     [
       params.keyId,
       params.model,
@@ -58,6 +60,8 @@ export async function logUsage(
       params.latencyMs,
       params.statusCode,
       params.stream,
+      params.providerId ?? null,
+      params.upstreamModelId ?? null,
     ],
   );
 

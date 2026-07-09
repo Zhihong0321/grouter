@@ -1,16 +1,16 @@
 import type { Pool } from "pg";
 
 export const SETTINGS_KEYS = {
-  SUBROUTER_API_KEY: "subrouter_api_key",
-  SUBROUTER_BASE_URL: "subrouter_base_url",
   KEY_PREFIX: "key_prefix",
 } as const;
 
 /**
  * Runtime config the admin manages through the dashboard instead of Railway
- * env vars (the subrouter key, its base URL, and the issued-key prefix).
- * Small and rarely-changed, so it's cached in-process and poll-refreshed,
- * same pattern as PriceCache -- invalidated immediately on admin write.
+ * env vars (currently just the issued-key prefix -- the upstream provider
+ * config that used to live here now lives in reseller_providers, see
+ * src/lib/router.ts). Small and rarely-changed, so it's cached in-process and
+ * poll-refreshed, same pattern as PriceCache -- invalidated immediately on
+ * admin write.
  */
 export class SettingsCache {
   private cache = new Map<string, string>();
@@ -38,14 +38,6 @@ export class SettingsCache {
   async get(key: string): Promise<string | undefined> {
     await this.ensureFresh();
     return this.cache.get(key);
-  }
-
-  async getSubrouterConfig(): Promise<{ apiKey: string; baseUrl: string } | undefined> {
-    await this.ensureFresh();
-    const apiKey = this.cache.get(SETTINGS_KEYS.SUBROUTER_API_KEY);
-    const baseUrl = this.cache.get(SETTINGS_KEYS.SUBROUTER_BASE_URL);
-    if (!apiKey || !baseUrl) return undefined;
-    return { apiKey, baseUrl };
   }
 
   async getKeyPrefix(): Promise<string> {

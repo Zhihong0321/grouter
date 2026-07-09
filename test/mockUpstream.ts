@@ -7,20 +7,28 @@ interface MockUsage {
   cache_read_input_tokens?: number;
 }
 
+export interface MockUpstreamOptions {
+  /** Defaults to "test-subrouter-key" -- kept as the default so existing tests don't need to pass it. */
+  expectedApiKey?: string;
+  /** When true, /v1/messages always returns 503 without ever forwarding a real response -- used to drive failover tests. */
+  failMessages?: boolean;
+}
+
 /**
  * Mimics Anthropic's POST /v1/messages closely enough to drive the proxy end
  * to end: supports both streaming (SSE) and non-streaming, with usage
  * (including cache fields) controllable per-request via an `x-mock-usage`
  * JSON header so tests can assert exact cache-write / cache-read scenarios.
  */
-export function createMockUpstream(): FastifyInstance {
+export function createMockUpstream(options: MockUpstreamOptions = {}): FastifyInstance {
+  const expectedApiKey = options.expectedApiKey ?? "test-subrouter-key";
   const app = Fastify({ logger: false });
 
   // Real Anthropic-shaped model list -- used by the zero-cost provider
   // health check (GET /v1/models never creates a message, so it never
   // consumes tokens).
   app.get("/v1/models", async (request, reply) => {
-    if (request.headers["x-api-key"] !== "test-subrouter-key") {
+    if (request.headers["x-api-key"] !== expectedApiKey) {
       return reply.code(401).send({ type: "error", error: { type: "authentication_error", message: "invalid x-api-key" } });
     }
     return reply.send({
@@ -33,6 +41,9 @@ export function createMockUpstream(): FastifyInstance {
   });
 
   app.post("/v1/messages", async (request, reply) => {
+    if (options.failMessages) {
+      return reply.code(503).send({ type: "error", error: { type: "overloaded_error", message: "mock upstream deliberately failing" } });
+    }
     const body = request.body as any;
     // `mock_usage` is not a real Anthropic field -- the proxy forwards the
     // client's JSON body verbatim, so tests can steer this test double's

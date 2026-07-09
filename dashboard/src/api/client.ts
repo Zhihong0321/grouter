@@ -66,18 +66,45 @@ export interface UsageResponse {
 }
 
 export interface SettingsDto {
-  subrouterApiKeyMasked: string | null;
-  subrouterConfigured: boolean;
-  subrouterBaseUrl: string | null;
   keyPrefix: string;
 }
 
-export interface SubrouterHealthDto {
+export interface ProviderHealthDto {
   ok: boolean;
   statusCode?: number;
   latencyMs: number;
   modelCount?: number;
   message: string;
+}
+
+export interface ModelDto {
+  modelId: string;
+  brand: string;
+  standard: "anthropic" | "openai";
+  displayName: string;
+  active: boolean;
+  createdAt: string;
+}
+
+export interface ProviderDto {
+  id: string;
+  name: string;
+  standard: "anthropic" | "openai";
+  baseUrl: string;
+  apiKeySet: boolean;
+  apiKeyLast4: string;
+  active: boolean;
+  createdAt: string;
+}
+
+export interface ModelRouteDto {
+  routeId: string;
+  providerId: string;
+  providerName: string;
+  standard: "anthropic" | "openai";
+  upstreamModelId: string;
+  priority: number;
+  active: boolean;
 }
 
 export const api = {
@@ -100,10 +127,26 @@ export const api = {
     request<ModelPriceDto>(`/prices/${modelId}`, { method: "PATCH", body: JSON.stringify(body) }),
 
   getSettings: () => request<SettingsDto>("/settings"),
-  updateSettings: (body: { subrouterApiKey?: string; subrouterBaseUrl?: string; keyPrefix?: string }) =>
-    request<SettingsDto>("/settings", { method: "PATCH", body: JSON.stringify(body) }),
-  testSettings: (body: { subrouterApiKey?: string; subrouterBaseUrl?: string }) =>
-    request<SubrouterHealthDto>("/settings/test", { method: "POST", body: JSON.stringify(body) }),
+  updateSettings: (body: { keyPrefix?: string }) => request<SettingsDto>("/settings", { method: "PATCH", body: JSON.stringify(body) }),
+
+  listModels: () => request<ModelDto[]>("/models"),
+  createModel: (body: { modelId: string; displayName: string }) =>
+    request<ModelDto>("/models", { method: "POST", body: JSON.stringify(body) }),
+  updateModel: (modelId: string, body: Partial<{ displayName: string; brand: string; active: boolean }>) =>
+    request<ModelDto>(`/models/${modelId}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteModel: (modelId: string) => request<ModelDto>(`/models/${modelId}`, { method: "DELETE" }),
+
+  listProviders: () => request<ProviderDto[]>("/providers"),
+  createProvider: (body: { name: string; baseUrl: string; apiKey: string }) =>
+    request<ProviderDto>("/providers", { method: "POST", body: JSON.stringify(body) }),
+  updateProvider: (id: string, body: Partial<{ name: string; baseUrl: string; apiKey: string; active: boolean }>) =>
+    request<ProviderDto>(`/providers/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteProvider: (id: string) => request<void>(`/providers/${id}`, { method: "DELETE" }),
+  checkProviderHealth: (id: string) => request<ProviderHealthDto>(`/providers/${id}/health`, { method: "POST" }),
+
+  getModelRoutes: (modelId: string) => request<ModelRouteDto[]>(`/models/${modelId}/routes`),
+  putModelRoutes: (modelId: string, routes: { providerId: string; upstreamModelId: string; priority: number }[]) =>
+    request<ModelRouteDto[]>(`/models/${modelId}/routes`, { method: "PUT", body: JSON.stringify({ routes }) }),
 };
 
 export function centsToDollars(cents: number | string): string {

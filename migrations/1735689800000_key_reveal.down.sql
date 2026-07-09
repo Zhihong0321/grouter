@@ -1,1 +1,1 @@
-ALTER TABLE reseller_api_keys DROP COLUMN key_ciphertext;
+ALTER TABLE reseller_api_keys DROP COLUMN IF EXISTS key_ciphertext;

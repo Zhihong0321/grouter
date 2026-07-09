@@ -1,7 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
 import type { Pool } from "pg";
 import { env } from "../config/env.js";
-import { SETTINGS_KEYS } from "../lib/settings.js";
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return Promise.race([
@@ -72,16 +71,26 @@ const debugRoutes: FastifyPluginAsync = async (app) => {
     try {
       const { rows } = await pgQuery(app.pg, "SELECT key, value FROM reseller_settings ORDER BY key");
       const settingsMap = Object.fromEntries(rows.map((r: any) => [r.key, r.value]));
-      const subrouterKey = settingsMap[SETTINGS_KEYS.SUBROUTER_API_KEY] as string | undefined;
-      const subrouterUrl = settingsMap[SETTINGS_KEYS.SUBROUTER_BASE_URL] as string | undefined;
       result.settings = {
-        subrouter_api_key: subrouterKey ? `set (${subrouterKey.slice(0, 8)}...)` : "MISSING",
-        subrouter_base_url: subrouterUrl ?? "MISSING",
-        key_prefix: settingsMap[SETTINGS_KEYS.KEY_PREFIX] ?? "MISSING",
+        key_prefix: settingsMap.key_prefix ?? "MISSING",
         all_keys: rows.map((r: any) => r.key),
       };
     } catch (err: any) {
       result.settings = { error: err?.message };
+    }
+
+    // Router: models / providers / routes counts
+    try {
+      const { rows: modelRows } = await pgQuery(app.pg, "SELECT COUNT(*) FILTER (WHERE active) AS active, COUNT(*) AS total FROM reseller_models");
+      const { rows: providerRows } = await pgQuery(app.pg, "SELECT COUNT(*) FILTER (WHERE active) AS active, COUNT(*) AS total FROM reseller_providers");
+      const { rows: routeRows } = await pgQuery(app.pg, "SELECT COUNT(*) FILTER (WHERE active) AS active, COUNT(*) AS total FROM reseller_model_routes");
+      result.router = {
+        models: { active: Number(modelRows[0].active), total: Number(modelRows[0].total) },
+        providers: { active: Number(providerRows[0].active), total: Number(providerRows[0].total) },
+        routes: { active: Number(routeRows[0].active), total: Number(routeRows[0].total) },
+      };
+    } catch (err: any) {
+      result.router = { error: err?.message };
     }
 
     // Tables existence check -- this database is shared with other apps, so

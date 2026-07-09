@@ -3,7 +3,8 @@ import { createHash } from "node:crypto";
 import { lookupKeyByHash } from "../../lib/keyAuth.js";
 import { checkRateLimit } from "../../lib/rateLimit.js";
 import { getRemainingBudgetCents } from "../../lib/budget.js";
-import { callUpstream, forwardResponseHeaders, pipeAndTapUsage, readJsonAndExtractUsage } from "../../lib/upstream.js";
+import { forwardResponseHeaders, pipeAndTapUsage, readJsonAndExtractUsage } from "../../lib/upstream.js";
+import { callWithFailover, AllProvidersFailedError } from "../../lib/failover.js";
 import { logUsage } from "../../lib/usageLogger.js";
 import { sendAnthropicError } from "../../lib/errors.js";
 
@@ -30,6 +31,18 @@ const proxyRoutes: FastifyPluginAsync = async (app) => {
       return sendAnthropicError(reply, "permission_error", `Key is not permitted to use model "${model}"`);
     }
 
+    const catalogModel = await app.routerCache.getModel(model);
+    if (!catalogModel) {
+      return sendAnthropicError(reply, "invalid_request_error", `Model "${model}" is not available`);
+    }
+    if (catalogModel.standard !== "anthropic") {
+      return sendAnthropicError(
+        reply,
+        "invalid_request_error",
+        `Model "${model}" uses the OpenAI-compatible API -- call POST /v1/chat/completions instead`,
+      );
+    }
+
     const price = await app.priceCache.get(model);
     if (!price) {
       return sendAnthropicError(reply, "invalid_request_error", `Model "${model}" is not available`);
@@ -45,18 +58,30 @@ const proxyRoutes: FastifyPluginAsync = async (app) => {
       return sendAnthropicError(reply, "billing_error", "Budget exhausted for this API key");
     }
 
-    const subrouter = await app.settingsCache.getSubrouterConfig();
-    if (!subrouter) {
-      return sendAnthropicError(reply, "billing_error", "Upstream is not configured yet -- set it in /admin");
+    const routes = await app.routerCache.getRoutes(model);
+    if (routes.length === 0) {
+      return sendAnthropicError(reply, "billing_error", `No upstream provider is configured for "${model}" yet -- set it up in /admin`);
     }
 
     const anthropicVersion = request.headers["anthropic-version"];
-    const { response, latencyStartMs } = await callUpstream(
-      subrouter,
-      body,
-      typeof anthropicVersion === "string" ? anthropicVersion : undefined,
-    );
 
+    let failover;
+    try {
+      failover = await callWithFailover(
+        routes,
+        body,
+        typeof anthropicVersion === "string" ? anthropicVersion : undefined,
+        request.log,
+      );
+    } catch (err) {
+      if (err instanceof AllProvidersFailedError) {
+        request.log.error({ model, attempts: err.attempts }, "all upstream providers failed for this model");
+        return sendAnthropicError(reply, "overloaded_error", "All upstream providers are currently unavailable for this model");
+      }
+      throw err;
+    }
+
+    const { response, latencyStartMs, providerId, upstreamModelId } = failover;
     const isStreaming = body?.stream === true;
 
     if (isStreaming) {
@@ -72,6 +97,8 @@ const proxyRoutes: FastifyPluginAsync = async (app) => {
           latencyMs: Date.now() - latencyStartMs,
           statusCode: response.status,
           stream: true,
+          providerId,
+          upstreamModelId,
         }).catch((err) => request.log.error(err, "logUsage failed"));
       }
       return;
@@ -87,6 +114,8 @@ const proxyRoutes: FastifyPluginAsync = async (app) => {
         latencyMs: Date.now() - latencyStartMs,
         statusCode: response.status,
         stream: false,
+        providerId,
+        upstreamModelId,
       }).catch((err) => request.log.error(err, "logUsage failed"));
     }
   });

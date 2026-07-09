@@ -9,7 +9,9 @@ import postgresPlugin from "./plugins/postgres.js";
 import redisPlugin from "./plugins/redis.js";
 import { PriceCache } from "./lib/pricing.js";
 import { SettingsCache } from "./lib/settings.js";
+import { RouterCache } from "./lib/router.js";
 import { RedisSessionStore } from "./lib/sessionStore.js";
+import { migrateLegacySubrouter } from "./lib/legacyMigration.js";
 import { env } from "./config/env.js";
 
 import healthRoutes from "./routes/health.js";
@@ -20,11 +22,15 @@ import keysRoutes from "./routes/admin/keys.js";
 import usageRoutes from "./routes/admin/usage.js";
 import pricesRoutes from "./routes/admin/prices.js";
 import settingsRoutes from "./routes/admin/settings.js";
+import modelsRoutes from "./routes/admin/models.js";
+import providersRoutes from "./routes/admin/providers.js";
+import modelRoutesRoutes from "./routes/admin/modelRoutes.js";
 
 declare module "fastify" {
   interface FastifyInstance {
     priceCache: PriceCache;
     settingsCache: SettingsCache;
+    routerCache: RouterCache;
   }
 }
 
@@ -39,6 +45,13 @@ export async function buildApp() {
 
   app.decorate("priceCache", new PriceCache(app.pg));
   app.decorate("settingsCache", new SettingsCache(app.pg));
+  app.decorate("routerCache", new RouterCache(app.pg));
+
+  // One-time, self-invalidating: converts the pre-router single subrouter
+  // config into a real provider + routes on first boot. No-op on every boot
+  // after that (see src/lib/legacyMigration.ts for the "already migrated"
+  // check).
+  await migrateLegacySubrouter(app.pg, app.settingsCache, app.log);
 
   const sessionMaxAgeMs = 1000 * 60 * 60 * 12;
   await app.register(cookie);
@@ -59,6 +72,9 @@ export async function buildApp() {
   await app.register(usageRoutes);
   await app.register(pricesRoutes);
   await app.register(settingsRoutes);
+  await app.register(modelsRoutes);
+  await app.register(providersRoutes);
+  await app.register(modelRoutesRoutes);
 
   // dashboard/dist only exists after `pnpm build:dashboard` has run. Guard so
   // the backend (and tests, and `pnpm dev`) still work standalone before

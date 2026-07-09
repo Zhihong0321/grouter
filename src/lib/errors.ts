@@ -6,7 +6,8 @@ type AnthropicErrorType =
   | "invalid_request_error"
   | "rate_limit_error"
   | "billing_error"
-  | "not_found_error";
+  | "not_found_error"
+  | "overloaded_error";
 
 const STATUS_BY_TYPE: Record<AnthropicErrorType, number> = {
   authentication_error: 401,
@@ -15,6 +16,7 @@ const STATUS_BY_TYPE: Record<AnthropicErrorType, number> = {
   rate_limit_error: 429,
   billing_error: 402,
   not_found_error: 404,
+  overloaded_error: 529,
 };
 
 /** Sends an error body shaped like Anthropic's own API so client SDKs parse it identically. */
