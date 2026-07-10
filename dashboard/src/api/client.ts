@@ -9,14 +9,14 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...options,
     credentials: "include",
-    headers: { "Content-Type": "application/json", ...options.headers },
+    headers: { ...(options.body ? { "Content-Type": "application/json" } : {}), ...options.headers },
   });
   if (res.status === 401 && path !== "/me") {
     window.dispatchEvent(new Event("admin-unauthenticated"));
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(body.error ?? `Request failed: ${res.status}`);
+    throw new Error(body.message ?? body.error ?? `Request failed: ${res.status}`);
   }
   if (res.status === 204) return undefined as T;
   return res.json();
