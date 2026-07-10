@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, type SettingsDto, type ModelDto, type ProviderDto, type ModelRouteDto, type ProviderHealthDto, type OpenAiEndpointTestResultDto } from "../api/client.js";
+import { api, type SettingsDto, type ModelDto, type ProviderDto, type ModelRouteDto, type ProviderHealthDto, type OpenAiEndpointTestResultDto, type OpenAiStreamingTestResultDto } from "../api/client.js";
 
 export default function RouterPage() {
   const [settings, setSettings] = useState<SettingsDto | null>(null);
@@ -26,6 +26,9 @@ export default function RouterPage() {
   const [openaiTestResults, setOpenaiTestResults] = useState<Record<string, OpenAiEndpointTestResultDto>>({});
   const [openaiTestErrors, setOpenaiTestErrors] = useState<Record<string, string>>({});
   const [testingOpenaiProvider, setTestingOpenaiProvider] = useState<string | null>(null);
+  const [streamingTestResults, setStreamingTestResults] = useState<Record<string, OpenAiStreamingTestResultDto>>({});
+  const [streamingTestErrors, setStreamingTestErrors] = useState<Record<string, string>>({});
+  const [testingStreamingProvider, setTestingStreamingProvider] = useState<string | null>(null);
 
   const [selectedModelId, setSelectedModelId] = useState("");
   const [routes, setRoutes] = useState<ModelRouteDto[]>([]);
@@ -188,6 +191,19 @@ export default function RouterPage() {
     }
   };
 
+  const testStreamingProvider = async (id: string) => {
+    setTestingStreamingProvider(id);
+    setStreamingTestErrors((prev) => ({ ...prev, [id]: "" }));
+    try {
+      const result = await api.testOpenaiStreaming(id);
+      setStreamingTestResults((prev) => ({ ...prev, [id]: result }));
+    } catch (err) {
+      setStreamingTestErrors((prev) => ({ ...prev, [id]: err instanceof Error ? err.message : "Test failed" }));
+    } finally {
+      setTestingStreamingProvider(null);
+    }
+  };
+
   const renumber = (list: ModelRouteDto[]): ModelRouteDto[] => list.map((r, i) => ({ ...r, priority: i + 1 }));
 
   const addRouteProvider = () => {
@@ -331,6 +347,17 @@ export default function RouterPage() {
                     {testingOpenaiProvider === p.id ? "Testing…" : "Test Chat + Responses"}
                   </button>
                 )}
+                {p.standard === "openai" && (
+                  <button
+                    type="button"
+                    className="secondary"
+                    title="Sends a real request with stream:true and verifies actual SSE events arrive -- a relay can accept stream:true and silently buffer the whole answer instead, which this catches and Test Chat + Responses can't"
+                    onClick={() => testStreamingProvider(p.id)}
+                    disabled={testingStreamingProvider === p.id}
+                  >
+                    {testingStreamingProvider === p.id ? "Testing…" : "Test Streaming"}
+                  </button>
+                )}
                 <button type="button" className="secondary" onClick={() => startEditProvider(p)}>
                   Edit
                 </button>
@@ -373,6 +400,26 @@ export default function RouterPage() {
                 {" — "}
                 <span style={{ color: openaiTestResults[p.id].responses.ok ? "#7ee787" : "#ff8080" }}>
                   responses: {openaiTestResults[p.id].responses.ok ? `OK (${openaiTestResults[p.id].responses.latencyMs}ms)` : `Failed: ${openaiTestResults[p.id].responses.message}${openaiTestResults[p.id].responses.statusCode ? ` (HTTP ${openaiTestResults[p.id].responses.statusCode})` : ""}`}
+                </span>
+              </p>
+            )}
+            {streamingTestErrors[p.id] && (
+              <p style={{ color: "#ff8080", fontSize: 12, marginBottom: 0 }}>Failed: {streamingTestErrors[p.id]}</p>
+            )}
+            {streamingTestResults[p.id] && (
+              <p style={{ fontSize: 12, marginBottom: 0 }}>
+                <span style={{ color: streamingTestResults[p.id].chat.ok ? "#7ee787" : "#ff8080" }}>
+                  chat/completions:{" "}
+                  {streamingTestResults[p.id].chat.ok
+                    ? `${streamingTestResults[p.id].chat.chunksReceived} chunks, first at ${streamingTestResults[p.id].chat.ttfbMs}ms, done at ${streamingTestResults[p.id].chat.totalMs}ms`
+                    : `Failed: ${streamingTestResults[p.id].chat.message}${streamingTestResults[p.id].chat.statusCode ? ` (HTTP ${streamingTestResults[p.id].chat.statusCode})` : ""}`}
+                </span>
+                {" — "}
+                <span style={{ color: streamingTestResults[p.id].responses.ok ? "#7ee787" : "#ff8080" }}>
+                  responses:{" "}
+                  {streamingTestResults[p.id].responses.ok
+                    ? `${streamingTestResults[p.id].responses.chunksReceived} chunks, first at ${streamingTestResults[p.id].responses.ttfbMs}ms, done at ${streamingTestResults[p.id].responses.totalMs}ms`
+                    : `Failed: ${streamingTestResults[p.id].responses.message}${streamingTestResults[p.id].responses.statusCode ? ` (HTTP ${streamingTestResults[p.id].responses.statusCode})` : ""}`}
                 </span>
               </p>
             )}

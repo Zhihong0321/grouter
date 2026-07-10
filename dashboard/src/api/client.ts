@@ -89,6 +89,20 @@ export interface OpenAiEndpointTestResultDto {
   responses: EndpointTestResultDto;
 }
 
+export interface StreamingTestResultDto {
+  ok: boolean;
+  statusCode?: number;
+  ttfbMs?: number;
+  totalMs: number;
+  chunksReceived: number;
+  message: string;
+}
+
+export interface OpenAiStreamingTestResultDto {
+  chat: StreamingTestResultDto;
+  responses: StreamingTestResultDto;
+}
+
 export interface ModelDto {
   modelId: string;
   brand: string;
@@ -178,6 +192,7 @@ export const api = {
   deleteProvider: (id: string) => request<void>(`/providers/${id}`, { method: "DELETE" }),
   checkProviderHealth: (id: string) => request<ProviderHealthDto>(`/providers/${id}/health`, { method: "POST" }),
   testOpenaiProvider: (id: string) => request<OpenAiEndpointTestResultDto>(`/providers/${id}/test-openai`, { method: "POST" }),
+  testOpenaiStreaming: (id: string) => request<OpenAiStreamingTestResultDto>(`/providers/${id}/test-openai-streaming`, { method: "POST" }),
 
   getModelRoutes: (modelId: string) => request<ModelRouteDto[]>(`/models/${modelId}/routes`),
   putModelRoutes: (modelId: string, routes: { providerId: string; upstreamModelId: string; priority: number }[]) =>

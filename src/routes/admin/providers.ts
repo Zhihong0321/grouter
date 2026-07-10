@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import { requireAdmin } from "./auth.js";
 import { encryptKey, decryptKey } from "../../lib/keyCrypto.js";
-import { checkProviderHealth, checkOpenAiEndpoints } from "../../lib/upstream.js";
+import { checkProviderHealth, checkOpenAiEndpoints, checkOpenAiStreaming } from "../../lib/upstream.js";
 
 interface CreateProviderBody {
   name: string;
@@ -153,6 +153,32 @@ const providersRoutes: FastifyPluginAsync = async (app) => {
     }
 
     return checkOpenAiEndpoints(
+      { baseUrl: provider.base_url, apiKey: decryptKey(provider.api_key_encrypted) },
+      routeRows[0].upstream_model_id,
+    );
+  });
+
+  // Verifies the provider actually streams SSE events rather than silently
+  // buffering the full completion before responding to stream:true --
+  // test-openai above never sets stream:true, so it can't catch that.
+  app.post<{ Params: { id: string } }>("/admin/api/providers/:id/test-openai-streaming", async (request, reply) => {
+    const { rows } = await app.pg.query("SELECT * FROM reseller_providers WHERE id = $1", [request.params.id]);
+    if (rows.length === 0) return reply.code(404).send({ error: "Not found" });
+
+    const provider = rows[0];
+    if (provider.standard !== "openai") {
+      return reply.code(400).send({ error: "This test only applies to OpenAI-standard providers" });
+    }
+
+    const { rows: routeRows } = await app.pg.query(
+      "SELECT upstream_model_id FROM reseller_model_routes WHERE provider_id = $1 LIMIT 1",
+      [request.params.id],
+    );
+    if (routeRows.length === 0) {
+      return reply.code(400).send({ error: "Add a model route for this provider first, then test streaming" });
+    }
+
+    return checkOpenAiStreaming(
       { baseUrl: provider.base_url, apiKey: decryptKey(provider.api_key_encrypted) },
       routeRows[0].upstream_model_id,
     );

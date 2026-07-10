@@ -215,6 +215,126 @@ export async function checkOpenAiEndpoints(
   return { chat, responses };
 }
 
+export interface StreamingTestResult {
+  ok: boolean;
+  statusCode?: number;
+  /** Time to the first SSE event -- what a real client would perceive as "it started responding". */
+  ttfbMs?: number;
+  totalMs: number;
+  chunksReceived: number;
+  message: string;
+}
+
+export interface OpenAiStreamingTestResult {
+  chat: StreamingTestResult;
+  responses: StreamingTestResult;
+}
+
+async function testStreamingEndpoint(
+  target: { baseUrl: string; apiKey: string },
+  endpoint: "chat/completions" | "responses",
+  body: Record<string, unknown>,
+): Promise<StreamingTestResult> {
+  const start = Date.now();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), ENDPOINT_TEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${providerBaseUrl(target.baseUrl)}/v1/${endpoint}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${target.apiKey}` },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const json = (await response.json().catch(() => undefined)) as
+        | { error?: { message?: string } | string; message?: string }
+        | undefined;
+      const upstreamMessage = typeof json?.error === "string" ? json.error : json?.error?.message ?? json?.message;
+      return {
+        ok: false,
+        statusCode: response.status,
+        totalMs: Date.now() - start,
+        chunksReceived: 0,
+        message: upstreamMessage ?? `Upstream returned ${response.status}`,
+      };
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      return { ok: false, statusCode: response.status, totalMs: Date.now() - start, chunksReceived: 0, message: "No response body" };
+    }
+
+    let chunksReceived = 0;
+    let ttfbMs: number | undefined;
+    const parser = createParser({
+      onEvent() {
+        chunksReceived += 1;
+        if (ttfbMs === undefined) ttfbMs = Date.now() - start;
+      },
+    });
+
+    const decoder = new TextDecoder();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      parser.feed(decoder.decode(value, { stream: true }));
+    }
+
+    const totalMs = Date.now() - start;
+    if (chunksReceived === 0) {
+      return {
+        ok: false,
+        statusCode: response.status,
+        totalMs,
+        chunksReceived,
+        message: "Connected and got a 2xx, but received zero SSE events -- this relay may silently ignore stream:true and just buffer the whole response",
+      };
+    }
+    return { ok: true, statusCode: response.status, ttfbMs, totalMs, chunksReceived, message: "OK" };
+  } catch (err) {
+    const timedOut = err instanceof Error && err.name === "AbortError";
+    return {
+      ok: false,
+      totalMs: Date.now() - start,
+      chunksReceived: 0,
+      message: timedOut ? `Timed out after ${ENDPOINT_TEST_TIMEOUT_MS / 1000}s` : err instanceof Error ? err.message : "Unknown error",
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
+ * Unlike checkOpenAiEndpoints (which always calls without stream:true), this
+ * verifies the provider actually streams: real SSE events must arrive, not
+ * just a 2xx with a content-type that looks right. A relay can accept
+ * stream:true and still buffer the entire completion before sending
+ * anything, which defeats the whole point -- this is the only test that
+ * would catch that.
+ */
+export async function checkOpenAiStreaming(
+  target: { baseUrl: string; apiKey: string },
+  upstreamModelId: string,
+): Promise<OpenAiStreamingTestResult> {
+  const [chat, responses] = await Promise.all([
+    testStreamingEndpoint(target, "chat/completions", {
+      model: upstreamModelId,
+      messages: [{ role: "user", content: "Count from 1 to 20." }],
+      max_tokens: 64,
+      stream: true,
+      stream_options: { include_usage: true },
+    }),
+    testStreamingEndpoint(target, "responses", {
+      model: upstreamModelId,
+      input: "Count from 1 to 20.",
+      max_output_tokens: 64,
+      stream: true,
+    }),
+  ]);
+  return { chat, responses };
+}
+
 /**
  * Forwards the client's request body to a single resolved provider, rewriting
  * `model` to whatever ID that supplier expects. The client's own issued key
