@@ -9,11 +9,14 @@ export default function RouterPage() {
   const [models, setModels] = useState<ModelDto[]>([]);
   const [newModelId, setNewModelId] = useState("");
   const [newModelName, setNewModelName] = useState("");
+  const [newModelBrand, setNewModelBrand] = useState("Anthropic");
+  const [newModelStandard, setNewModelStandard] = useState<"anthropic" | "openai">("anthropic");
 
   const [providers, setProviders] = useState<ProviderDto[]>([]);
   const [newProviderName, setNewProviderName] = useState("");
   const [newProviderUrl, setNewProviderUrl] = useState("");
   const [newProviderKey, setNewProviderKey] = useState("");
+  const [newProviderStandard, setNewProviderStandard] = useState<"anthropic" | "openai">("anthropic");
   const [healthResults, setHealthResults] = useState<Record<string, ProviderHealthDto>>({});
   const [testingProvider, setTestingProvider] = useState<string | null>(null);
 
@@ -65,9 +68,11 @@ export default function RouterPage() {
     e.preventDefault();
     setError(null);
     try {
-      await api.createModel({ modelId: newModelId, displayName: newModelName });
+      await api.createModel({ modelId: newModelId, displayName: newModelName, brand: newModelBrand, standard: newModelStandard });
       setNewModelId("");
       setNewModelName("");
+      setNewModelBrand("Anthropic");
+      setNewModelStandard("anthropic");
       await loadModels();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to add model");
@@ -83,10 +88,11 @@ export default function RouterPage() {
     e.preventDefault();
     setError(null);
     try {
-      await api.createProvider({ name: newProviderName, baseUrl: newProviderUrl, apiKey: newProviderKey });
+      await api.createProvider({ name: newProviderName, baseUrl: newProviderUrl, apiKey: newProviderKey, standard: newProviderStandard });
       setNewProviderName("");
       setNewProviderUrl("");
       setNewProviderKey("");
+      setNewProviderStandard("anthropic");
       await loadProviders();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to add provider");
@@ -225,6 +231,11 @@ export default function RouterPage() {
         <form onSubmit={addModel} className="form-row" style={{ flexDirection: "row", alignItems: "center", marginTop: 12 }}>
           <input placeholder="model_id (e.g. claude-sonnet-5)" value={newModelId} onChange={(e) => setNewModelId(e.target.value)} required />
           <input placeholder="Display name" value={newModelName} onChange={(e) => setNewModelName(e.target.value)} required />
+          <input placeholder="Brand (e.g. OpenAI)" value={newModelBrand} onChange={(e) => setNewModelBrand(e.target.value)} required />
+          <select value={newModelStandard} onChange={(e) => setNewModelStandard(e.target.value as "anthropic" | "openai")}>
+            <option value="anthropic">Anthropic API</option>
+            <option value="openai">OpenAI-compatible API</option>
+          </select>
           <button type="submit">Add model</button>
         </form>
       </div>
@@ -265,6 +276,10 @@ export default function RouterPage() {
           <input placeholder="Name (e.g. SupplierX)" value={newProviderName} onChange={(e) => setNewProviderName(e.target.value)} required />
           <input placeholder="Base URL" value={newProviderUrl} onChange={(e) => setNewProviderUrl(e.target.value)} required />
           <input type="password" placeholder="API key" value={newProviderKey} onChange={(e) => setNewProviderKey(e.target.value)} required />
+          <select value={newProviderStandard} onChange={(e) => setNewProviderStandard(e.target.value as "anthropic" | "openai")}>
+            <option value="anthropic">Anthropic API</option>
+            <option value="openai">OpenAI-compatible API</option>
+          </select>
           <button type="submit">Add provider</button>
         </form>
       </div>

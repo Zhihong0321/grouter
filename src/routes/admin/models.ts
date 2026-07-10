@@ -33,12 +33,15 @@ const modelsRoutes: FastifyPluginAsync = async (app) => {
     return rows.map(rowToDto);
   });
 
-  // brand/standard default to Anthropic-only for this build -- see
-  // implemenation_plan_0709.md §13 for when a picker is needed.
+  // Keep Anthropic as the backwards-compatible default, while allowing the
+  // dashboard/API to add OpenAI-compatible catalog models explicitly.
   app.post<{ Body: CreateModelBody }>("/admin/api/models", async (request, reply) => {
     const { modelId, displayName, brand = "Anthropic", standard = "anthropic" } = request.body;
     if (!modelId || !displayName) {
       return reply.code(400).send({ error: "modelId and displayName are required" });
+    }
+    if (standard !== "anthropic" && standard !== "openai") {
+      return reply.code(400).send({ error: "standard must be anthropic or openai" });
     }
 
     const { rows } = await app.pg.query(
@@ -47,7 +50,17 @@ const modelsRoutes: FastifyPluginAsync = async (app) => {
       [modelId, brand, standard, displayName],
     );
 
+    // A model must have a price row before it can be called. New catalog
+    // entries start at zero and can be priced from the dashboard immediately.
+    await app.pg.query(
+      `INSERT INTO reseller_model_prices
+         (model_id, input_price_cents_per_million, output_price_cents_per_million, cache_write_price_cents_per_million, cache_read_price_cents_per_million)
+       VALUES ($1, 0, 0, 0, 0)`,
+      [modelId],
+    );
+
     app.routerCache.invalidate();
+    app.priceCache.invalidate();
     reply.code(201).send(rowToDto(rows[0]));
   });
 

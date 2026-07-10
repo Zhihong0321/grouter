@@ -1,6 +1,6 @@
 import type { ServerResponse } from "node:http";
 import { createParser, type EventSourceMessage } from "eventsource-parser";
-import { StreamingUsageAccumulator, extractUsage } from "./usageExtract.js";
+import { OpenAiStreamingUsageAccumulator, StreamingUsageAccumulator, extractOpenAiUsage, extractUsage } from "./usageExtract.js";
 import type { CapturedUsage } from "../types/anthropic.js";
 import type { ProviderStandard } from "../types/router.js";
 
@@ -42,15 +42,19 @@ function authHeaders(target: Pick<ProviderTarget, "standard" | "apiKey">, anthro
   if (target.standard === "anthropic") {
     return { "x-api-key": target.apiKey, "anthropic-version": anthropicVersion ?? "2023-06-01" };
   }
-  // openai-standard support is deferred -- see implemenation_plan_0709.md §13.
-  throw new Error(`Unsupported provider standard: ${target.standard}`);
+  return { authorization: `Bearer ${target.apiKey}` };
 }
 
-export type UpstreamEndpoint = "messages" | "messages/count_tokens";
+export type UpstreamEndpoint = "messages" | "messages/count_tokens" | "chat/completions" | "responses";
 
 function endpointPath(target: Pick<ProviderTarget, "standard" | "baseUrl">, endpoint: UpstreamEndpoint): string {
-  if (target.standard === "anthropic") return `${target.baseUrl}/v1/${endpoint}`;
-  throw new Error(`Unsupported provider standard: ${target.standard}`);
+  if (target.standard === "anthropic" && (endpoint === "messages" || endpoint === "messages/count_tokens")) {
+    return `${target.baseUrl}/v1/${endpoint}`;
+  }
+  if (target.standard === "openai" && (endpoint === "chat/completions" || endpoint === "responses")) {
+    return `${target.baseUrl}/v1/${endpoint}`;
+  }
+  throw new Error(`Endpoint ${endpoint} is not supported by provider standard ${target.standard}`);
 }
 
 const HEALTH_CHECK_TIMEOUT_MS = 10_000;
@@ -72,7 +76,7 @@ async function fetchModels(target: Pick<ProviderTarget, "standard" | "baseUrl" |
 
 /**
  * Verifies a provider's key/base URL actually work, without spending any
- * tokens: GET /v1/models is a metadata lookup on the real Anthropic API
+ * tokens: GET /v1/models is a metadata lookup on the provider's API
  * surface (auth + routing only), never a completion, so it's a true
  * zero-cost smoke test for provider health.
  *
@@ -140,10 +144,19 @@ export async function callUpstream(
   const timeout = setTimeout(() => controller.abort(), UPSTREAM_CONNECT_TIMEOUT_MS);
 
   try {
+    const upstreamBody: Record<string, unknown> = { ...body, model: target.upstreamModelId };
+    if (target.standard === "openai" && endpoint === "chat/completions" && body.stream === true) {
+      const existing = body.stream_options;
+      upstreamBody.stream_options = {
+        ...(existing && typeof existing === "object" && !Array.isArray(existing) ? existing : {}),
+        include_usage: true,
+      };
+    }
+
     const response = await fetch(endpointPath(target, endpoint), {
       method: "POST",
       headers: { "content-type": "application/json", ...authHeaders(target, anthropicVersion) },
-      body: JSON.stringify({ ...body, model: target.upstreamModelId }),
+      body: JSON.stringify(upstreamBody),
       signal: controller.signal,
     });
     return { response, latencyStartMs };
@@ -166,8 +179,13 @@ export function forwardResponseHeaders(response: Response, rawRes: ServerRespons
  * extract usage (including cache fields). The tap never gates or delays the
  * client-facing write.
  */
-export async function pipeAndTapUsage(response: Response, rawRes: ServerResponse): Promise<CapturedUsage> {
+export async function pipeAndTapUsage(
+  response: Response,
+  rawRes: ServerResponse,
+  standard: ProviderStandard = "anthropic",
+): Promise<CapturedUsage> {
   const accumulator = new StreamingUsageAccumulator();
+  const openAiAccumulator = new OpenAiStreamingUsageAccumulator();
 
   const parser = createParser({
     onEvent(event: EventSourceMessage) {
@@ -176,6 +194,10 @@ export async function pipeAndTapUsage(response: Response, rawRes: ServerResponse
       try {
         parsed = JSON.parse(event.data);
       } catch {
+        return;
+      }
+      if (standard === "openai") {
+        openAiAccumulator.onEvent(parsed);
         return;
       }
       if (parsed.type === "message_start") {
@@ -201,11 +223,14 @@ export async function pipeAndTapUsage(response: Response, rawRes: ServerResponse
   }
   rawRes.end();
 
-  return accumulator.get();
+  return standard === "openai" ? openAiAccumulator.get() : accumulator.get();
 }
 
 /** Non-streaming path: read the full JSON body, return both the parsed body and its usage. */
-export async function readJsonAndExtractUsage(response: Response): Promise<{ json: any; usage: CapturedUsage }> {
+export async function readJsonAndExtractUsage(
+  response: Response,
+  standard: ProviderStandard = "anthropic",
+): Promise<{ json: any; usage: CapturedUsage }> {
   const json = (await response.json()) as any;
-  return { json, usage: extractUsage(json?.usage) };
+  return { json, usage: standard === "openai" ? extractOpenAiUsage(json?.usage) : extractUsage(json?.usage) };
 }

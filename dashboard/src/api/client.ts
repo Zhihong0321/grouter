@@ -130,14 +130,14 @@ export const api = {
   updateSettings: (body: { keyPrefix?: string }) => request<SettingsDto>("/settings", { method: "PATCH", body: JSON.stringify(body) }),
 
   listModels: () => request<ModelDto[]>("/models"),
-  createModel: (body: { modelId: string; displayName: string }) =>
+  createModel: (body: { modelId: string; displayName: string; brand?: string; standard?: "anthropic" | "openai" }) =>
     request<ModelDto>("/models", { method: "POST", body: JSON.stringify(body) }),
   updateModel: (modelId: string, body: Partial<{ displayName: string; brand: string; active: boolean }>) =>
     request<ModelDto>(`/models/${modelId}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteModel: (modelId: string) => request<ModelDto>(`/models/${modelId}`, { method: "DELETE" }),
 
   listProviders: () => request<ProviderDto[]>("/providers"),
-  createProvider: (body: { name: string; baseUrl: string; apiKey: string }) =>
+  createProvider: (body: { name: string; baseUrl: string; apiKey: string; standard?: "anthropic" | "openai" }) =>
     request<ProviderDto>("/providers", { method: "POST", body: JSON.stringify(body) }),
   updateProvider: (id: string, body: Partial<{ name: string; baseUrl: string; apiKey: string; active: boolean }>) =>
     request<ProviderDto>(`/providers/${id}`, { method: "PATCH", body: JSON.stringify(body) }),

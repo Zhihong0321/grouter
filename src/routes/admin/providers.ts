@@ -54,6 +54,9 @@ const providersRoutes: FastifyPluginAsync = async (app) => {
     if (!name || !baseUrl || !apiKey) {
       return reply.code(400).send({ error: "name, baseUrl, and apiKey are required" });
     }
+    if (standard !== "anthropic" && standard !== "openai") {
+      return reply.code(400).send({ error: "standard must be anthropic or openai" });
+    }
 
     const { rows } = await app.pg.query(
       `INSERT INTO reseller_providers (name, standard, base_url, api_key_encrypted)

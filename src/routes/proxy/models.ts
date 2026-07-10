@@ -20,14 +20,30 @@ const modelsRoutes: FastifyPluginAsync = async (app) => {
       return sendAnthropicError(reply, "authentication_error", "Invalid or revoked API key");
     }
 
+    const authorization = request.headers.authorization;
+    const wantsOpenAi = !request.headers["x-api-key"] && typeof authorization === "string" && authorization.toLowerCase().startsWith("bearer ");
+    const standard = wantsOpenAi ? "openai" : "anthropic";
     const { rows } = await app.pg.query(
       `SELECT model_id, display_name, created_at FROM reseller_models
-       WHERE active = true AND standard = 'anthropic'
+       WHERE active = true AND standard = $1
        ORDER BY model_id ASC`,
+      [standard],
     );
 
     const restrictions = keyRecord.modelRestrictions;
     const visible = restrictions ? rows.filter((r: any) => restrictions.includes(r.model_id)) : rows;
+
+    if (wantsOpenAi) {
+      return reply.send({
+        object: "list",
+        data: visible.map((r: any) => ({
+          id: r.model_id,
+          object: "model",
+          created: Math.floor(new Date(r.created_at).getTime() / 1000),
+          owned_by: r.brand,
+        })),
+      });
+    }
 
     const data = visible.map((r: any) => ({
       type: "model",
