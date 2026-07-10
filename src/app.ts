@@ -18,6 +18,7 @@ import healthRoutes from "./routes/health.js";
 import debugRoutes from "./routes/debug.js";
 import proxyRoutes from "./routes/proxy/messages.js";
 import countTokensRoutes from "./routes/proxy/countTokens.js";
+import proxyModelsRoutes from "./routes/proxy/models.js";
 import authRoutes from "./routes/admin/auth.js";
 import keysRoutes from "./routes/admin/keys.js";
 import usageRoutes from "./routes/admin/usage.js";
@@ -69,6 +70,7 @@ export async function buildApp() {
   await app.register(debugRoutes);
   await app.register(proxyRoutes);
   await app.register(countTokensRoutes);
+  await app.register(proxyModelsRoutes);
   await app.register(authRoutes);
   await app.register(keysRoutes);
   await app.register(usageRoutes);
