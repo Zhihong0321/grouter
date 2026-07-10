@@ -46,8 +46,10 @@ function authHeaders(target: Pick<ProviderTarget, "standard" | "apiKey">, anthro
   throw new Error(`Unsupported provider standard: ${target.standard}`);
 }
 
-function messagesPath(target: Pick<ProviderTarget, "standard" | "baseUrl">): string {
-  if (target.standard === "anthropic") return `${target.baseUrl}/v1/messages`;
+export type UpstreamEndpoint = "messages" | "messages/count_tokens";
+
+function endpointPath(target: Pick<ProviderTarget, "standard" | "baseUrl">, endpoint: UpstreamEndpoint): string {
+  if (target.standard === "anthropic") return `${target.baseUrl}/v1/${endpoint}`;
   throw new Error(`Unsupported provider standard: ${target.standard}`);
 }
 
@@ -131,13 +133,14 @@ export async function callUpstream(
   target: ProviderTarget,
   body: Record<string, unknown>,
   anthropicVersion: string | undefined,
+  endpoint: UpstreamEndpoint = "messages",
 ): Promise<UpstreamCallResult> {
   const latencyStartMs = Date.now();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), UPSTREAM_CONNECT_TIMEOUT_MS);
 
   try {
-    const response = await fetch(messagesPath(target), {
+    const response = await fetch(endpointPath(target, endpoint), {
       method: "POST",
       headers: { "content-type": "application/json", ...authHeaders(target, anthropicVersion) },
       body: JSON.stringify({ ...body, model: target.upstreamModelId }),

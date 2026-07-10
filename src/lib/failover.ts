@@ -1,5 +1,5 @@
 import type { FastifyBaseLogger } from "fastify";
-import { callUpstream, type ProviderTarget, type UpstreamCallResult } from "./upstream.js";
+import { callUpstream, type ProviderTarget, type UpstreamCallResult, type UpstreamEndpoint } from "./upstream.js";
 import type { ResolvedRoute } from "../types/router.js";
 
 const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504, 529]);
@@ -38,6 +38,7 @@ export async function callWithFailover(
   body: Record<string, unknown>,
   anthropicVersion: string | undefined,
   log: Pick<FastifyBaseLogger, "warn">,
+  endpoint: UpstreamEndpoint = "messages",
 ): Promise<FailoverResult> {
   const attempts: FailoverAttempt[] = [];
 
@@ -51,7 +52,7 @@ export async function callWithFailover(
 
     let result: UpstreamCallResult;
     try {
-      result = await callUpstream(target, body, anthropicVersion);
+      result = await callUpstream(target, body, anthropicVersion, endpoint);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
       attempts.push({ providerName: route.providerName, error: message });
