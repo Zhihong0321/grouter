@@ -6,6 +6,7 @@ import KeysListPage from "./pages/KeysListPage.js";
 import KeyDetailPage from "./pages/KeyDetailPage.js";
 import PriceTablePage from "./pages/PriceTablePage.js";
 import RouterPage from "./pages/RouterPage.js";
+import LogsPage from "./pages/LogsPage.js";
 
 export default function App() {
   const [authed, setAuthed] = useState<boolean | null>(null);
@@ -43,6 +44,7 @@ export default function App() {
         <Link to="/keys">Keys</Link>
         <Link to="/prices">Prices</Link>
         <Link to="/router">Router</Link>
+        <Link to="/logs">Logs</Link>
         <span style={{ marginLeft: "auto" }}>
           <button className="secondary" onClick={logout}>Log out</button>
         </span>
@@ -54,6 +56,7 @@ export default function App() {
           <Route path="/keys/:id" element={<KeyDetailPage />} />
           <Route path="/prices" element={<PriceTablePage />} />
           <Route path="/router" element={<RouterPage />} />
+          <Route path="/logs" element={<LogsPage />} />
         </Routes>
       </div>
     </>

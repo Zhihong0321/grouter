@@ -119,6 +119,23 @@ export interface ModelRouteDto {
   active: boolean;
 }
 
+export interface RequestLogDto {
+  id: string;
+  created_at: string;
+  key_id: string | null;
+  key_name: string | null;
+  endpoint: string;
+  model: string;
+  outcome: "success" | "upstream_error" | "all_providers_failed" | "no_route";
+  status_code: number | null;
+  provider_id: string | null;
+  provider_name: string | null;
+  upstream_model_id: string | null;
+  error_message: string | null;
+  attempts: { providerName: string; statusCode?: number; error?: string }[] | null;
+  latency_ms: number | null;
+}
+
 export const api = {
   login: (email: string, password: string) => request<{ ok: true }>("/login", { method: "POST", body: JSON.stringify({ email, password }) }),
   logout: () => request<{ ok: true }>("/logout", { method: "POST" }),
@@ -160,6 +177,16 @@ export const api = {
   getModelRoutes: (modelId: string) => request<ModelRouteDto[]>(`/models/${modelId}/routes`),
   putModelRoutes: (modelId: string, routes: { providerId: string; upstreamModelId: string; priority: number }[]) =>
     request<ModelRouteDto[]>(`/models/${modelId}/routes`, { method: "PUT", body: JSON.stringify({ routes }) }),
+
+  listRequestLogs: (filters: { limit?: number; model?: string; outcome?: string; keyId?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (filters.limit) params.set("limit", String(filters.limit));
+    if (filters.model) params.set("model", filters.model);
+    if (filters.outcome) params.set("outcome", filters.outcome);
+    if (filters.keyId) params.set("keyId", filters.keyId);
+    const qs = params.toString();
+    return request<RequestLogDto[]>(`/logs${qs ? `?${qs}` : ""}`);
+  },
 };
 
 export function centsToDollars(cents: number | string): string {
