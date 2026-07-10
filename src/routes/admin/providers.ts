@@ -89,8 +89,28 @@ const providersRoutes: FastifyPluginAsync = async (app) => {
   // DELETE CASCADE); historical usage_logs keep their row with provider_id
   // set to NULL (ON DELETE SET NULL) rather than blocking the delete.
   app.delete<{ Params: { id: string } }>("/admin/api/providers/:id", async (request, reply) => {
-    const { rows } = await app.pg.query("DELETE FROM reseller_providers WHERE id = $1 RETURNING id", [request.params.id]);
-    if (rows.length === 0) return reply.code(404).send({ error: "Not found" });
+    const client = await app.pg.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows: providerRows } = await client.query("SELECT id FROM reseller_providers WHERE id = $1 FOR UPDATE", [request.params.id]);
+      if (providerRows.length === 0) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ error: "Not found" });
+      }
+
+      // Do this explicitly instead of relying on migration-time FK actions:
+      // it also works against older production databases created before the
+      // ON DELETE CASCADE/SET NULL constraints were installed.
+      await client.query("DELETE FROM reseller_model_routes WHERE provider_id = $1", [request.params.id]);
+      await client.query("UPDATE reseller_usage_logs SET provider_id = NULL WHERE provider_id = $1", [request.params.id]);
+      await client.query("DELETE FROM reseller_providers WHERE id = $1", [request.params.id]);
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
 
     app.routerCache.invalidate();
     reply.code(204).send();

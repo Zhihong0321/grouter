@@ -101,14 +101,17 @@ export async function checkProviderHealth(target: { standard: ProviderStandard; 
     try {
       const response = await fetchModels(target);
       const latencyMs = Date.now() - start;
-      const json = (await response.json().catch(() => undefined)) as { error?: { message?: string }; data?: unknown[] } | undefined;
+      const json = (await response.json().catch(() => undefined)) as
+        | { error?: { message?: string } | string; message?: string; data?: unknown[] }
+        | undefined;
+      const upstreamMessage = typeof json?.error === "string" ? json.error : json?.error?.message ?? json?.message;
 
       if (!response.ok) {
         return {
           ok: false,
           statusCode: response.status,
           latencyMs,
-          message: json?.error?.message ?? `Upstream returned ${response.status}`,
+          message: upstreamMessage ?? `Upstream returned ${response.status}`,
         };
       }
 
