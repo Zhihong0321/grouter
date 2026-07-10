@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { api, centsToDollars, type ApiKeyDto } from "../api/client.js";
+import ConnectionInfo from "../components/ConnectionInfo.js";
 
 function KeyCell({ prefix, fullKey }: { prefix: string; fullKey: string | null }) {
   const [revealed, setRevealed] = useState(false);
@@ -34,6 +35,7 @@ function KeyCell({ prefix, fullKey }: { prefix: string; fullKey: string | null }
 export default function KeysListPage() {
   const [keys, setKeys] = useState<ApiKeyDto[]>([]);
   const [showCreate, setShowCreate] = useState(false);
+  const [justCreated, setJustCreated] = useState<ApiKeyDto | null>(null);
 
   const [name, setName] = useState("");
   const [rateLimitRpm, setRateLimitRpm] = useState(60);
@@ -44,8 +46,9 @@ export default function KeysListPage() {
 
   const create = async (e: FormEvent) => {
     e.preventDefault();
-    await api.createKey({ name, rateLimitRpm, budgetCents });
+    const created = await api.createKey({ name, rateLimitRpm, budgetCents });
     setShowCreate(false);
+    setJustCreated(created);
     setName("");
     await load();
   };
@@ -62,6 +65,16 @@ export default function KeysListPage() {
         <h2>API Keys</h2>
         <button onClick={() => setShowCreate(true)}>Create key</button>
       </div>
+
+      {justCreated && (
+        <div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12 }}>
+            <strong>"{justCreated.name}" is ready -- here's how to connect to it:</strong>
+            <button type="button" className="secondary" onClick={() => setJustCreated(null)}>Dismiss</button>
+          </div>
+          <ConnectionInfo apiKey={justCreated.key} keyPrefix={justCreated.keyPrefix} />
+        </div>
+      )}
 
       {showCreate && (
         <form onSubmit={create} className="card">

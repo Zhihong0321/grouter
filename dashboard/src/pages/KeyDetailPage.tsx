@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { api, centsToDollars, type ApiKeyDto, type UsageResponse } from "../api/client.js";
+import ConnectionInfo from "../components/ConnectionInfo.js";
 
 export default function KeyDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -37,6 +38,9 @@ export default function KeyDetailPage() {
   return (
     <div>
       <h2>{key.name}</h2>
+
+      <ConnectionInfo apiKey={key.key} keyPrefix={key.keyPrefix} />
+
       <div className="card">
         <div className="form-row">
           <label>Rate limit (req/min)</label>

@@ -51,52 +51,75 @@ function messagesPath(target: Pick<ProviderTarget, "standard" | "baseUrl">): str
   throw new Error(`Unsupported provider standard: ${target.standard}`);
 }
 
+const HEALTH_CHECK_TIMEOUT_MS = 10_000;
+const HEALTH_CHECK_RETRY_DELAY_MS = 500;
+
+async function fetchModels(target: Pick<ProviderTarget, "standard" | "baseUrl" | "apiKey">): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), HEALTH_CHECK_TIMEOUT_MS);
+  try {
+    return await fetch(`${target.baseUrl}/v1/models`, {
+      method: "GET",
+      headers: authHeaders(target),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 /**
  * Verifies a provider's key/base URL actually work, without spending any
  * tokens: GET /v1/models is a metadata lookup on the real Anthropic API
  * surface (auth + routing only), never a completion, so it's a true
  * zero-cost smoke test for provider health.
+ *
+ * A dropped connection to the upstream is retried once before being reported
+ * as a failure -- a single blip shouldn't read as "the key is bad" to the
+ * admin. A real HTTP error response (401/400/etc, an actual answer from the
+ * server) is not retried, since retrying won't change a genuine rejection.
  */
 export async function checkProviderHealth(target: { standard: ProviderStandard; baseUrl: string; apiKey: string }): Promise<ProviderHealthResult> {
   const start = Date.now();
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10_000);
+  let lastError: unknown;
 
-  try {
-    const response = await fetch(`${target.baseUrl}/v1/models`, {
-      method: "GET",
-      headers: authHeaders(target),
-      signal: controller.signal,
-    });
-    const latencyMs = Date.now() - start;
-    const json = (await response.json().catch(() => undefined)) as { error?: { message?: string }; data?: unknown[] } | undefined;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, HEALTH_CHECK_RETRY_DELAY_MS));
 
-    if (!response.ok) {
+    try {
+      const response = await fetchModels(target);
+      const latencyMs = Date.now() - start;
+      const json = (await response.json().catch(() => undefined)) as { error?: { message?: string }; data?: unknown[] } | undefined;
+
+      if (!response.ok) {
+        return {
+          ok: false,
+          statusCode: response.status,
+          latencyMs,
+          message: json?.error?.message ?? `Upstream returned ${response.status}`,
+        };
+      }
+
       return {
-        ok: false,
+        ok: true,
         statusCode: response.status,
         latencyMs,
-        message: json?.error?.message ?? `Upstream returned ${response.status}`,
+        modelCount: Array.isArray(json?.data) ? json.data.length : undefined,
+        message: "Provider key is valid",
       };
+    } catch (err) {
+      lastError = err;
+      // A timeout already burned the full budget -- retrying won't help within a single "Test" click.
+      if (err instanceof Error && err.name === "AbortError") break;
     }
-
-    return {
-      ok: true,
-      statusCode: response.status,
-      latencyMs,
-      modelCount: Array.isArray(json?.data) ? json.data.length : undefined,
-      message: "Provider key is valid",
-    };
-  } catch (err) {
-    const timedOut = err instanceof Error && err.name === "AbortError";
-    return {
-      ok: false,
-      latencyMs: Date.now() - start,
-      message: timedOut ? "Timed out after 10s" : err instanceof Error ? err.message : "Unknown error",
-    };
-  } finally {
-    clearTimeout(timeout);
   }
+
+  const timedOut = lastError instanceof Error && lastError.name === "AbortError";
+  return {
+    ok: false,
+    latencyMs: Date.now() - start,
+    message: timedOut ? "Timed out after 10s" : lastError instanceof Error ? lastError.message : "Unknown error",
+  };
 }
 
 /**
