@@ -1,1 +1,1 @@
-DROP TABLE reseller_request_logs;
+DROP TABLE IF EXISTS reseller_request_logs;
