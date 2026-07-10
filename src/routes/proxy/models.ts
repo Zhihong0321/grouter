@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
 import { createHash } from "node:crypto";
-import { lookupKeyByHash } from "../../lib/keyAuth.js";
+import { extractApiKey, lookupKeyByHash } from "../../lib/keyAuth.js";
 import { sendAnthropicError } from "../../lib/errors.js";
 
 // Real Anthropic API surface -- clients (Claude Code's provider switcher
@@ -9,9 +9,9 @@ import { sendAnthropicError } from "../../lib/errors.js";
 // freshly-configured client could fail before ever sending a message.
 const modelsRoutes: FastifyPluginAsync = async (app) => {
   app.get("/v1/models", async (request, reply) => {
-    const apiKeyHeader = request.headers["x-api-key"];
-    if (typeof apiKeyHeader !== "string" || apiKeyHeader.length === 0) {
-      return sendAnthropicError(reply, "authentication_error", "Missing x-api-key header");
+    const apiKeyHeader = extractApiKey(request.headers);
+    if (!apiKeyHeader) {
+      return sendAnthropicError(reply, "authentication_error", "Missing x-api-key or Authorization header");
     }
 
     const hash = createHash("sha256").update(apiKeyHeader).digest("hex");

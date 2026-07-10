@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
 import { createHash } from "node:crypto";
-import { lookupKeyByHash } from "../../lib/keyAuth.js";
+import { extractApiKey, lookupKeyByHash } from "../../lib/keyAuth.js";
 import { checkRateLimit } from "../../lib/rateLimit.js";
 import { callWithFailover, AllProvidersFailedError } from "../../lib/failover.js";
 import { sendAnthropicError } from "../../lib/errors.js";
@@ -13,9 +13,9 @@ import { sendAnthropicError } from "../../lib/errors.js";
 // is free on the real Anthropic API and carries no usage to log.
 const countTokensRoutes: FastifyPluginAsync = async (app) => {
   app.post("/v1/messages/count_tokens", async (request, reply) => {
-    const apiKeyHeader = request.headers["x-api-key"];
-    if (typeof apiKeyHeader !== "string" || apiKeyHeader.length === 0) {
-      return sendAnthropicError(reply, "authentication_error", "Missing x-api-key header");
+    const apiKeyHeader = extractApiKey(request.headers);
+    if (!apiKeyHeader) {
+      return sendAnthropicError(reply, "authentication_error", "Missing x-api-key or Authorization header");
     }
 
     const hash = createHash("sha256").update(apiKeyHeader).digest("hex");

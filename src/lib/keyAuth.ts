@@ -2,6 +2,27 @@ import type { Pool } from "pg";
 import type { Redis } from "ioredis";
 import type { ApiKeyRecord } from "../types/apiKey.js";
 
+/**
+ * Claude Code (and Anthropic-compatible clients generally) support two
+ * separate env vars for custom gateways: ANTHROPIC_API_KEY (sent as
+ * `x-api-key`) and ANTHROPIC_AUTH_TOKEN (sent as `Authorization: Bearer`,
+ * meant for enterprise LLM gateways). Tools that manage those env vars don't
+ * reliably let a user pick which one to use, so a real client can arrive
+ * with either -- accept both rather than forcing one convention.
+ */
+export function extractApiKey(headers: Record<string, string | string[] | undefined>): string | undefined {
+  const xApiKey = headers["x-api-key"];
+  if (typeof xApiKey === "string" && xApiKey.length > 0) return xApiKey;
+
+  const authorization = headers["authorization"];
+  if (typeof authorization === "string" && authorization.toLowerCase().startsWith("bearer ")) {
+    const token = authorization.slice("bearer ".length).trim();
+    if (token.length > 0) return token;
+  }
+
+  return undefined;
+}
+
 const CACHE_TTL_SECONDS = 45;
 
 function cacheKeyFor(hash: string): string {
