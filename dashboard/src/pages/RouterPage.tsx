@@ -17,6 +17,10 @@ export default function RouterPage() {
   const [newProviderUrl, setNewProviderUrl] = useState("");
   const [newProviderKey, setNewProviderKey] = useState("");
   const [newProviderStandard, setNewProviderStandard] = useState<"anthropic" | "openai">("anthropic");
+  const [editingProviderId, setEditingProviderId] = useState<string | null>(null);
+  const [editProviderName, setEditProviderName] = useState("");
+  const [editProviderUrl, setEditProviderUrl] = useState("");
+  const [editProviderKey, setEditProviderKey] = useState("");
   const [healthResults, setHealthResults] = useState<Record<string, ProviderHealthDto>>({});
   const [testingProvider, setTestingProvider] = useState<string | null>(null);
 
@@ -100,15 +104,57 @@ export default function RouterPage() {
   };
 
   const toggleProviderActive = async (p: ProviderDto) => {
-    await api.updateProvider(p.id, { active: !p.active });
-    await loadProviders();
+    setError(null);
+    try {
+      await api.updateProvider(p.id, { active: !p.active });
+      await loadProviders();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update provider");
+    }
+  };
+
+  const startEditProvider = (p: ProviderDto) => {
+    setError(null);
+    setEditingProviderId(p.id);
+    setEditProviderName(p.name);
+    setEditProviderUrl(p.baseUrl);
+    setEditProviderKey("");
+  };
+
+  const cancelEditProvider = () => {
+    setEditingProviderId(null);
+    setEditProviderName("");
+    setEditProviderUrl("");
+    setEditProviderKey("");
+  };
+
+  const saveProvider = async (e: FormEvent, id: string) => {
+    e.preventDefault();
+    setError(null);
+    try {
+      await api.updateProvider(id, {
+        name: editProviderName,
+        baseUrl: editProviderUrl,
+        ...(editProviderKey ? { apiKey: editProviderKey } : {}),
+      });
+      cancelEditProvider();
+      await loadProviders();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save provider");
+    }
   };
 
   const deleteProvider = async (p: ProviderDto) => {
     if (!confirm(`Delete provider "${p.name}"? This removes it from any model's routing.`)) return;
-    await api.deleteProvider(p.id);
-    await loadProviders();
-    loadRoutes(selectedModelId);
+    setError(null);
+    try {
+      await api.deleteProvider(p.id);
+      if (editingProviderId === p.id) cancelEditProvider();
+      await loadProviders();
+      await loadRoutes(selectedModelId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete provider");
+    }
   };
 
   const testProvider = async (id: string) => {
@@ -258,11 +304,30 @@ export default function RouterPage() {
                 <button type="button" className="secondary" onClick={() => testProvider(p.id)} disabled={testingProvider === p.id}>
                   {testingProvider === p.id ? "Testing…" : "Test"}
                 </button>
+                <button type="button" className="secondary" onClick={() => startEditProvider(p)}>
+                  Edit
+                </button>
                 <button type="button" className="danger" onClick={() => deleteProvider(p)}>
                   Delete
                 </button>
               </div>
             </div>
+            {editingProviderId === p.id && (
+              <form onSubmit={(e) => saveProvider(e, p.id)} className="form-row" style={{ flexDirection: "row", alignItems: "center", marginTop: 12, flexWrap: "wrap" }}>
+                <input value={editProviderName} onChange={(e) => setEditProviderName(e.target.value)} placeholder="Provider name" required />
+                <input value={editProviderUrl} onChange={(e) => setEditProviderUrl(e.target.value)} placeholder="Base URL" required />
+                <input
+                  type="password"
+                  value={editProviderKey}
+                  onChange={(e) => setEditProviderKey(e.target.value)}
+                  placeholder="New API key (optional)"
+                />
+                <button type="submit">Save changes</button>
+                <button type="button" className="secondary" onClick={cancelEditProvider}>
+                  Cancel
+                </button>
+              </form>
+            )}
             {healthResults[p.id] && (
               <p style={{ color: healthResults[p.id].ok ? "#7ee787" : "#ff8080", fontSize: 12, marginBottom: 0 }}>
                 {healthResults[p.id].ok
