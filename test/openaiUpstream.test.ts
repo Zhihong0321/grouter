@@ -33,7 +33,7 @@ describe("OpenAI-compatible upstream transport", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await callUpstream(
-      { standard: "openai", baseUrl: "https://supplier.example", apiKey: "secret", upstreamModelId: "supplier-response-model" },
+      { standard: "openai", baseUrl: "https://supplier.example/v1", apiKey: "secret", upstreamModelId: "supplier-response-model" },
       { model: "public-model", stream: true },
       undefined,
       "responses",

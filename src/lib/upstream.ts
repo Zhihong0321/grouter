@@ -38,6 +38,12 @@ export interface ProviderHealthResult {
 // long-running streamed generations are never cut short by this.
 const UPSTREAM_CONNECT_TIMEOUT_MS = 60_000;
 
+// Admins commonly paste either the provider host or its `/v1` API root. Keep
+// one canonical form internally so requests never become `/v1/v1/...`.
+function providerBaseUrl(baseUrl: string): string {
+  return baseUrl.replace(/\/+$/, "").replace(/\/v1$/i, "");
+}
+
 function authHeaders(target: Pick<ProviderTarget, "standard" | "apiKey">, anthropicVersion?: string): Record<string, string> {
   if (target.standard === "anthropic") {
     return { "x-api-key": target.apiKey, "anthropic-version": anthropicVersion ?? "2023-06-01" };
@@ -49,10 +55,10 @@ export type UpstreamEndpoint = "messages" | "messages/count_tokens" | "chat/comp
 
 function endpointPath(target: Pick<ProviderTarget, "standard" | "baseUrl">, endpoint: UpstreamEndpoint): string {
   if (target.standard === "anthropic" && (endpoint === "messages" || endpoint === "messages/count_tokens")) {
-    return `${target.baseUrl}/v1/${endpoint}`;
+    return `${providerBaseUrl(target.baseUrl)}/v1/${endpoint}`;
   }
   if (target.standard === "openai" && (endpoint === "chat/completions" || endpoint === "responses")) {
-    return `${target.baseUrl}/v1/${endpoint}`;
+    return `${providerBaseUrl(target.baseUrl)}/v1/${endpoint}`;
   }
   throw new Error(`Endpoint ${endpoint} is not supported by provider standard ${target.standard}`);
 }
@@ -64,7 +70,7 @@ async function fetchModels(target: Pick<ProviderTarget, "standard" | "baseUrl" |
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), HEALTH_CHECK_TIMEOUT_MS);
   try {
-    return await fetch(`${target.baseUrl}/v1/models`, {
+    return await fetch(`${providerBaseUrl(target.baseUrl)}/v1/models`, {
       method: "GET",
       headers: authHeaders(target),
       signal: controller.signal,
