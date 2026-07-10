@@ -11,6 +11,7 @@ import { sendAnthropicError } from "../../lib/errors.js";
 
 const proxyRoutes: FastifyPluginAsync = async (app) => {
   app.post("/v1/messages", async (request, reply) => {
+    const requestStartMs = Date.now();
     const apiKeyHeader = extractApiKey(request.headers);
     if (!apiKeyHeader) {
       return sendAnthropicError(reply, "authentication_error", "Missing x-api-key or Authorization header");
@@ -67,11 +68,13 @@ const proxyRoutes: FastifyPluginAsync = async (app) => {
         model,
         outcome: "no_route",
         errorMessage: "No upstream provider is configured for this model",
+        preDispatchMs: Date.now() - requestStartMs,
       }).catch((err) => request.log.error(err, "logRequestEvent failed"));
       return sendAnthropicError(reply, "billing_error", `No upstream provider is configured for "${model}" yet -- set it up in /admin`);
     }
 
     const anthropicVersion = request.headers["anthropic-version"];
+    const dispatchStartMs = Date.now();
 
     let failover;
     try {
@@ -90,13 +93,14 @@ const proxyRoutes: FastifyPluginAsync = async (app) => {
           model,
           outcome: "all_providers_failed",
           attempts: err.attempts,
+          preDispatchMs: dispatchStartMs - requestStartMs,
         }).catch((logErr) => request.log.error(logErr, "logRequestEvent failed"));
         return sendAnthropicError(reply, "overloaded_error", "All upstream providers are currently unavailable for this model");
       }
       throw err;
     }
 
-    const { response, latencyStartMs, providerId, providerName, upstreamModelId, attempts } = failover;
+    const { response, latencyStartMs, headersReceivedMs, providerId, providerName, upstreamModelId, attempts } = failover;
     const isStreaming = body?.stream === true;
 
     const logDispatch = (statusCode: number, latencyMs: number) =>
@@ -110,6 +114,8 @@ const proxyRoutes: FastifyPluginAsync = async (app) => {
         providerName,
         upstreamModelId,
         latencyMs,
+        preDispatchMs: dispatchStartMs - requestStartMs,
+        upstreamTtfbMs: headersReceivedMs - latencyStartMs,
         attempts: attempts.length > 0 ? attempts : undefined,
       }).catch((err) => request.log.error(err, "logRequestEvent failed"));
 

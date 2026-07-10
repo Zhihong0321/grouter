@@ -43,8 +43,8 @@ export default function LogsPage() {
       <h2>Request logs</h2>
       <p style={{ color: "#9aa4b2" }}>
         Every dispatched request, plus anything that never made it upstream — no provider configured for the model,
-        or every failover provider rejected it. Successful/errored dispatch rows show which provider actually handled
-        it; expand a row to see the per-provider failover attempts.
+        or every failover provider rejected it. Click a row to break latency down into our own overhead, upstream
+        connect/time-to-first-byte, and provider generation time, plus any per-provider failover attempts.
       </p>
       {error && <p style={{ color: "#ff8080" }}>{error}</p>}
 
@@ -80,7 +80,7 @@ export default function LogsPage() {
           {logs.map((log) => (
             <Fragment key={log.id}>
               <tr
-                style={{ cursor: log.attempts || log.error_message ? "pointer" : undefined }}
+                style={{ cursor: "pointer" }}
                 onClick={() => setExpanded((prev) => (prev === log.id ? null : log.id))}
               >
                 <td>{new Date(log.created_at).toLocaleString()}</td>
@@ -95,9 +95,52 @@ export default function LogsPage() {
                 <td>{log.upstream_model_id ?? "—"}</td>
                 <td>{log.latency_ms != null ? `${log.latency_ms}ms` : "—"}</td>
               </tr>
-              {expanded === log.id && (log.attempts || log.error_message) && (
+              {expanded === log.id && (
                 <tr>
                   <td colSpan={9} style={{ background: "#1a1d24" }}>
+                    {(log.pre_dispatch_ms != null || log.upstream_ttfb_ms != null || log.latency_ms != null) && (
+                      <table style={{ margin: "4px 0" }}>
+                        <thead>
+                          <tr>
+                            <th>Stage</th>
+                            <th>Time</th>
+                            <th></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr>
+                            <td>Pre-dispatch (auth, rate limit, budget, routing lookup)</td>
+                            <td>{log.pre_dispatch_ms != null ? `${log.pre_dispatch_ms}ms` : "—"}</td>
+                            <td style={{ color: "#9aa4b2", fontSize: 12 }}>our own overhead</td>
+                          </tr>
+                          <tr>
+                            <td>Upstream connect + time-to-first-byte</td>
+                            <td>{log.upstream_ttfb_ms != null ? `${log.upstream_ttfb_ms}ms` : "—"}</td>
+                            <td style={{ color: "#9aa4b2", fontSize: 12 }}>network + provider queueing</td>
+                          </tr>
+                          <tr>
+                            <td>Provider generation / streaming</td>
+                            <td>
+                              {log.latency_ms != null && log.upstream_ttfb_ms != null
+                                ? `${log.latency_ms - log.upstream_ttfb_ms}ms`
+                                : "—"}
+                            </td>
+                            <td style={{ color: "#9aa4b2", fontSize: 12 }}>time the provider spent producing the answer</td>
+                          </tr>
+                          <tr>
+                            <td><strong>Total</strong></td>
+                            <td>
+                              <strong>
+                                {log.pre_dispatch_ms != null && log.latency_ms != null
+                                  ? `${log.pre_dispatch_ms + log.latency_ms}ms`
+                                  : "—"}
+                              </strong>
+                            </td>
+                            <td></td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    )}
                     {log.error_message && <p style={{ margin: "4px 0" }}>{log.error_message}</p>}
                     {log.attempts && log.attempts.length > 0 && (
                       <table style={{ margin: "4px 0" }}>

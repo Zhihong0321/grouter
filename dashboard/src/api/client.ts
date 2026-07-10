@@ -133,7 +133,12 @@ export interface RequestLogDto {
   upstream_model_id: string | null;
   error_message: string | null;
   attempts: { providerName: string; statusCode?: number; error?: string }[] | null;
+  /** Time from upstream dispatch to full response consumed (ttfb + generation/streaming). */
   latency_ms: number | null;
+  /** Our own overhead before dispatch: auth lookup, rate limit, budget check, routing lookup. */
+  pre_dispatch_ms: number | null;
+  /** Time from dispatch to the winning provider's response headers arriving. */
+  upstream_ttfb_ms: number | null;
 }
 
 export const api = {

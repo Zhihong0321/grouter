@@ -23,6 +23,8 @@ const HOP_BY_HOP_HEADERS = new Set([
 export interface UpstreamCallResult {
   response: Response;
   latencyStartMs: number;
+  /** When the provider's response headers actually arrived -- fetch() resolves here, before the body streams. */
+  headersReceivedMs: number;
 }
 
 export interface ProviderHealthResult {
@@ -244,7 +246,7 @@ export async function callUpstream(
       body: JSON.stringify(upstreamBody),
       signal: controller.signal,
     });
-    return { response, latencyStartMs };
+    return { response, latencyStartMs, headersReceivedMs: Date.now() };
   } finally {
     clearTimeout(timeout);
   }

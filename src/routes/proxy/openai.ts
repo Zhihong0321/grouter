@@ -12,6 +12,7 @@ import { sendOpenAiError } from "../../lib/errors.js";
 type OpenAiEndpoint = "chat/completions" | "responses";
 
 async function handleOpenAiRequest(app: Parameters<FastifyPluginAsync>[0], request: any, reply: any, endpoint: OpenAiEndpoint) {
+  const requestStartMs = Date.now();
   const apiKeyHeader = extractApiKey(request.headers);
   if (!apiKeyHeader) {
     return sendOpenAiError(reply, "authentication_error", "Missing Authorization header");
@@ -67,10 +68,12 @@ async function handleOpenAiRequest(app: Parameters<FastifyPluginAsync>[0], reque
       model,
       outcome: "no_route",
       errorMessage: "No upstream provider is configured for this model",
+      preDispatchMs: Date.now() - requestStartMs,
     }).catch((err) => request.log.error(err, "logRequestEvent failed"));
     return sendOpenAiError(reply, "billing_error", `No upstream provider is configured for "${model}" yet -- set it up in /admin`);
   }
 
+  const dispatchStartMs = Date.now();
   let failover;
   try {
     failover = await callWithFailover(routes, body, undefined, request.log, endpoint);
@@ -83,13 +86,14 @@ async function handleOpenAiRequest(app: Parameters<FastifyPluginAsync>[0], reque
         model,
         outcome: "all_providers_failed",
         attempts: err.attempts,
+        preDispatchMs: dispatchStartMs - requestStartMs,
       }).catch((logErr) => request.log.error(logErr, "logRequestEvent failed"));
       return sendOpenAiError(reply, "overloaded_error", "All upstream providers are currently unavailable for this model");
     }
     throw err;
   }
 
-  const { response, latencyStartMs, providerId, providerName, upstreamModelId, attempts } = failover;
+  const { response, latencyStartMs, headersReceivedMs, providerId, providerName, upstreamModelId, attempts } = failover;
   const isStreaming = body.stream === true;
 
   const logDispatch = (statusCode: number, latencyMs: number) =>
@@ -103,6 +107,8 @@ async function handleOpenAiRequest(app: Parameters<FastifyPluginAsync>[0], reque
       providerName,
       upstreamModelId,
       latencyMs,
+      preDispatchMs: dispatchStartMs - requestStartMs,
+      upstreamTtfbMs: headersReceivedMs - latencyStartMs,
       attempts: attempts.length > 0 ? attempts : undefined,
     }).catch((err) => request.log.error(err, "logRequestEvent failed"));
 
