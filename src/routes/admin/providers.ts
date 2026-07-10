@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import { requireAdmin } from "./auth.js";
 import { encryptKey, decryptKey } from "../../lib/keyCrypto.js";
-import { checkProviderHealth } from "../../lib/upstream.js";
+import { checkProviderHealth, checkOpenAiEndpoints } from "../../lib/upstream.js";
 
 interface CreateProviderBody {
   name: string;
@@ -128,6 +128,34 @@ const providersRoutes: FastifyPluginAsync = async (app) => {
       baseUrl: provider.base_url,
       apiKey: decryptKey(provider.api_key_encrypted),
     });
+  });
+
+  // Real minimal completions against chat/completions and responses -- spends
+  // a handful of upstream tokens, unlike the zero-cost /health check above.
+  // Needs an upstream_model_id to call with, so it borrows one from any
+  // existing route for this provider rather than asking the admin to type
+  // one in separately.
+  app.post<{ Params: { id: string } }>("/admin/api/providers/:id/test-openai", async (request, reply) => {
+    const { rows } = await app.pg.query("SELECT * FROM reseller_providers WHERE id = $1", [request.params.id]);
+    if (rows.length === 0) return reply.code(404).send({ error: "Not found" });
+
+    const provider = rows[0];
+    if (provider.standard !== "openai") {
+      return reply.code(400).send({ error: "This test only applies to OpenAI-standard providers" });
+    }
+
+    const { rows: routeRows } = await app.pg.query(
+      "SELECT upstream_model_id FROM reseller_model_routes WHERE provider_id = $1 LIMIT 1",
+      [request.params.id],
+    );
+    if (routeRows.length === 0) {
+      return reply.code(400).send({ error: "Add a model route for this provider first, then test chat/responses" });
+    }
+
+    return checkOpenAiEndpoints(
+      { baseUrl: provider.base_url, apiKey: decryptKey(provider.api_key_encrypted) },
+      routeRows[0].upstream_model_id,
+    );
   });
 };
 

@@ -137,6 +137,82 @@ export async function checkProviderHealth(target: { standard: ProviderStandard; 
   };
 }
 
+export interface EndpointTestResult {
+  ok: boolean;
+  statusCode?: number;
+  latencyMs: number;
+  message: string;
+}
+
+export interface OpenAiEndpointTestResult {
+  chat: EndpointTestResult;
+  responses: EndpointTestResult;
+}
+
+const ENDPOINT_TEST_TIMEOUT_MS = 20_000;
+
+async function testEndpoint(
+  target: { baseUrl: string; apiKey: string },
+  endpoint: "chat/completions" | "responses",
+  body: Record<string, unknown>,
+): Promise<EndpointTestResult> {
+  const start = Date.now();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), ENDPOINT_TEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${providerBaseUrl(target.baseUrl)}/v1/${endpoint}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${target.apiKey}` },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    const latencyMs = Date.now() - start;
+    const json = (await response.json().catch(() => undefined)) as
+      | { error?: { message?: string } | string; message?: string }
+      | undefined;
+    const upstreamMessage = typeof json?.error === "string" ? json.error : json?.error?.message ?? json?.message;
+
+    if (!response.ok) {
+      return { ok: false, statusCode: response.status, latencyMs, message: upstreamMessage ?? `Upstream returned ${response.status}` };
+    }
+    return { ok: true, statusCode: response.status, latencyMs, message: "OK" };
+  } catch (err) {
+    const timedOut = err instanceof Error && err.name === "AbortError";
+    return {
+      ok: false,
+      latencyMs: Date.now() - start,
+      message: timedOut ? `Timed out after ${ENDPOINT_TEST_TIMEOUT_MS / 1000}s` : err instanceof Error ? err.message : "Unknown error",
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
+ * Unlike checkProviderHealth (GET /v1/models, zero-cost), this fires a real
+ * minimal completion at both OpenAI-standard endpoints -- it spends a
+ * handful of upstream tokens on each call, since /v1/models existing doesn't
+ * guarantee chat/completions or responses actually work on a given relay.
+ */
+export async function checkOpenAiEndpoints(
+  target: { baseUrl: string; apiKey: string },
+  upstreamModelId: string,
+): Promise<OpenAiEndpointTestResult> {
+  const [chat, responses] = await Promise.all([
+    testEndpoint(target, "chat/completions", {
+      model: upstreamModelId,
+      messages: [{ role: "user", content: "ping" }],
+      max_tokens: 1,
+    }),
+    testEndpoint(target, "responses", {
+      model: upstreamModelId,
+      input: "ping",
+      max_output_tokens: 16,
+    }),
+  ]);
+  return { chat, responses };
+}
+
 /**
  * Forwards the client's request body to a single resolved provider, rewriting
  * `model` to whatever ID that supplier expects. The client's own issued key

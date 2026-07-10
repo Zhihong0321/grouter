@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, type SettingsDto, type ModelDto, type ProviderDto, type ModelRouteDto, type ProviderHealthDto } from "../api/client.js";
+import { api, type SettingsDto, type ModelDto, type ProviderDto, type ModelRouteDto, type ProviderHealthDto, type OpenAiEndpointTestResultDto } from "../api/client.js";
 
 export default function RouterPage() {
   const [settings, setSettings] = useState<SettingsDto | null>(null);
@@ -23,6 +23,9 @@ export default function RouterPage() {
   const [editProviderKey, setEditProviderKey] = useState("");
   const [healthResults, setHealthResults] = useState<Record<string, ProviderHealthDto>>({});
   const [testingProvider, setTestingProvider] = useState<string | null>(null);
+  const [openaiTestResults, setOpenaiTestResults] = useState<Record<string, OpenAiEndpointTestResultDto>>({});
+  const [openaiTestErrors, setOpenaiTestErrors] = useState<Record<string, string>>({});
+  const [testingOpenaiProvider, setTestingOpenaiProvider] = useState<string | null>(null);
 
   const [selectedModelId, setSelectedModelId] = useState("");
   const [routes, setRoutes] = useState<ModelRouteDto[]>([]);
@@ -172,6 +175,19 @@ export default function RouterPage() {
     }
   };
 
+  const testOpenaiProvider = async (id: string) => {
+    setTestingOpenaiProvider(id);
+    setOpenaiTestErrors((prev) => ({ ...prev, [id]: "" }));
+    try {
+      const result = await api.testOpenaiProvider(id);
+      setOpenaiTestResults((prev) => ({ ...prev, [id]: result }));
+    } catch (err) {
+      setOpenaiTestErrors((prev) => ({ ...prev, [id]: err instanceof Error ? err.message : "Test failed" }));
+    } finally {
+      setTestingOpenaiProvider(null);
+    }
+  };
+
   const renumber = (list: ModelRouteDto[]): ModelRouteDto[] => list.map((r, i) => ({ ...r, priority: i + 1 }));
 
   const addRouteProvider = () => {
@@ -304,6 +320,17 @@ export default function RouterPage() {
                 <button type="button" className="secondary" onClick={() => testProvider(p.id)} disabled={testingProvider === p.id}>
                   {testingProvider === p.id ? "Testing…" : "Test"}
                 </button>
+                {p.standard === "openai" && (
+                  <button
+                    type="button"
+                    className="secondary"
+                    title="Sends a real minimal request to chat/completions and responses -- spends a small amount of upstream tokens, unlike Test"
+                    onClick={() => testOpenaiProvider(p.id)}
+                    disabled={testingOpenaiProvider === p.id}
+                  >
+                    {testingOpenaiProvider === p.id ? "Testing…" : "Test Chat + Responses"}
+                  </button>
+                )}
                 <button type="button" className="secondary" onClick={() => startEditProvider(p)}>
                   Edit
                 </button>
@@ -333,6 +360,20 @@ export default function RouterPage() {
                 {healthResults[p.id].ok
                   ? `Connected — ${healthResults[p.id].modelCount ?? "?"} model(s) available (${healthResults[p.id].latencyMs}ms)`
                   : `Failed: ${healthResults[p.id].message}${healthResults[p.id].statusCode ? ` (HTTP ${healthResults[p.id].statusCode})` : ""}`}
+              </p>
+            )}
+            {openaiTestErrors[p.id] && (
+              <p style={{ color: "#ff8080", fontSize: 12, marginBottom: 0 }}>Failed: {openaiTestErrors[p.id]}</p>
+            )}
+            {openaiTestResults[p.id] && (
+              <p style={{ fontSize: 12, marginBottom: 0 }}>
+                <span style={{ color: openaiTestResults[p.id].chat.ok ? "#7ee787" : "#ff8080" }}>
+                  chat/completions: {openaiTestResults[p.id].chat.ok ? `OK (${openaiTestResults[p.id].chat.latencyMs}ms)` : `Failed: ${openaiTestResults[p.id].chat.message}${openaiTestResults[p.id].chat.statusCode ? ` (HTTP ${openaiTestResults[p.id].chat.statusCode})` : ""}`}
+                </span>
+                {" — "}
+                <span style={{ color: openaiTestResults[p.id].responses.ok ? "#7ee787" : "#ff8080" }}>
+                  responses: {openaiTestResults[p.id].responses.ok ? `OK (${openaiTestResults[p.id].responses.latencyMs}ms)` : `Failed: ${openaiTestResults[p.id].responses.message}${openaiTestResults[p.id].responses.statusCode ? ` (HTTP ${openaiTestResults[p.id].responses.statusCode})` : ""}`}
+                </span>
               </p>
             )}
           </div>

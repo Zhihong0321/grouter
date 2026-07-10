@@ -77,6 +77,18 @@ export interface ProviderHealthDto {
   message: string;
 }
 
+export interface EndpointTestResultDto {
+  ok: boolean;
+  statusCode?: number;
+  latencyMs: number;
+  message: string;
+}
+
+export interface OpenAiEndpointTestResultDto {
+  chat: EndpointTestResultDto;
+  responses: EndpointTestResultDto;
+}
+
 export interface ModelDto {
   modelId: string;
   brand: string;
@@ -143,6 +155,7 @@ export const api = {
     request<ProviderDto>(`/providers/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteProvider: (id: string) => request<void>(`/providers/${id}`, { method: "DELETE" }),
   checkProviderHealth: (id: string) => request<ProviderHealthDto>(`/providers/${id}/health`, { method: "POST" }),
+  testOpenaiProvider: (id: string) => request<OpenAiEndpointTestResultDto>(`/providers/${id}/test-openai`, { method: "POST" }),
 
   getModelRoutes: (modelId: string) => request<ModelRouteDto[]>(`/models/${modelId}/routes`),
   putModelRoutes: (modelId: string, routes: { providerId: string; upstreamModelId: string; priority: number }[]) =>
