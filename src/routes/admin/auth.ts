@@ -10,6 +10,7 @@ declare module "fastify" {
 export async function requireAdmin(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   if (!request.session.adminId) {
     reply.code(401).send({ error: "Not authenticated" });
+    return;
   }
 }
 
