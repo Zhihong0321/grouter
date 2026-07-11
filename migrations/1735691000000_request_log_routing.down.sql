@@ -1,10 +1,10 @@
 ALTER TABLE reseller_request_logs
-  DROP COLUMN client,
-  DROP COLUMN smart_routing_enabled,
-  DROP COLUMN routing_mode,
-  DROP COLUMN requested_tier,
-  DROP COLUMN chosen_model,
-  DROP COLUMN rule_id,
-  DROP COLUMN was_overridden,
-  DROP COLUMN cost_baseline_cents,
-  DROP COLUMN cost_saved_cents;
+  DROP COLUMN IF EXISTS client,
+  DROP COLUMN IF EXISTS smart_routing_enabled,
+  DROP COLUMN IF EXISTS routing_mode,
+  DROP COLUMN IF EXISTS requested_tier,
+  DROP COLUMN IF EXISTS chosen_model,
+  DROP COLUMN IF EXISTS rule_id,
+  DROP COLUMN IF EXISTS was_overridden,
+  DROP COLUMN IF EXISTS cost_baseline_cents,
+  DROP COLUMN IF EXISTS cost_saved_cents;
