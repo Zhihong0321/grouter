@@ -79,6 +79,25 @@ describe("SubRouterClient", () => {
     }
   });
 
+  it("parses unsafe JSON integers without losing precision", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response('{"success":true,"data":{"page":1,"page_size":1,"total":1,"items":[{"id":9007199254740993123}]}}', {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    ) as typeof fetch;
+
+    const client = new SubRouterClient({
+      baseUrl: "https://subrouter.ai",
+      session: SESSION,
+      userId: USER_ID,
+      fetchImpl,
+    });
+    const page = await client.listActivity({ page: 1, pageSize: 1, startTimestamp: 0, endTimestamp: 1 });
+
+    expect(String(page.items[0].id)).toBe("9007199254740993123");
+  });
+
   it("rejects an account response for a different user", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({ success: true, data: { id: 99 } })) as typeof fetch;
     const client = new SubRouterClient({

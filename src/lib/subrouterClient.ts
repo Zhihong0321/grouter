@@ -1,3 +1,7 @@
+import JSONbigFactory from "json-bigint";
+
+const JSONbig = JSONbigFactory();
+
 export type SubRouterErrorType =
   | "auth_expired"
   | "invalid_response"
@@ -17,6 +21,7 @@ export class SubRouterError extends Error {
 }
 
 type FetchLike = typeof fetch;
+export type JsonInteger = number | bigint | { isInteger(): boolean; toFixed(): string };
 
 export interface SubRouterClientOptions {
   baseUrl: string;
@@ -37,8 +42,46 @@ interface GetResult {
   data: unknown;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export interface ActivityPage {
+  page: number;
+  pageSize: number;
+  total: number;
+  items: Record<string, unknown>[];
+}
+
+export interface SupplierStats {
+  quota: string;
+  token: string;
+}
+
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function integerString(value: unknown, field: string): string {
+  if (typeof value === "bigint") return value.toString();
+  if (typeof value === "number" && Number.isSafeInteger(value)) return String(value);
+  if (typeof value === "string" && /^-?\d+$/.test(value)) return value;
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    value.constructor?.name === "BigNumber" &&
+    typeof (value as { isInteger?: unknown }).isInteger === "function" &&
+    typeof (value as { toFixed?: unknown }).toFixed === "function" &&
+    (value as { isInteger(): boolean }).isInteger()
+  ) {
+    return (value as { toFixed(): string }).toFixed();
+  }
+  throw new SubRouterError("invalid_response", `SubRouter field ${field} was not an exact integer`);
+}
+
+function nonNegativeSafeNumber(value: unknown, field: string): number {
+  const parsed = integerString(value, field);
+  const asNumber = Number(parsed);
+  if (!Number.isSafeInteger(asNumber) || asNumber < 0) {
+    throw new SubRouterError("invalid_response", `SubRouter field ${field} was out of range`);
+  }
+  return asNumber;
 }
 
 function isAuthRedirect(response: Response): boolean {
@@ -52,6 +95,14 @@ function isAuthRedirect(response: Response): boolean {
 
 function looksLikeAuthFailure(message: unknown): boolean {
   return typeof message === "string" && /(auth|login|session|unauthor|forbidden|未登录|登录)/i.test(message);
+}
+
+export function stringifySupplierJson(value: unknown): string {
+  return JSONbig.stringify(value);
+}
+
+export function parseSupplierJson(value: string): unknown {
+  return JSONbig.parse(value);
 }
 
 export class SubRouterClient {
@@ -108,7 +159,7 @@ export class SubRouterClient {
 
     let envelope: unknown;
     try {
-      envelope = await response.json();
+      envelope = JSONbig.parse(await response.text());
     } catch {
       throw new SubRouterError("invalid_response", "SubRouter returned invalid JSON", response.status);
     }
@@ -128,43 +179,78 @@ export class SubRouterClient {
     return { statusCode: response.status, data: parsed.data };
   }
 
+  async getAccount(): Promise<Record<string, unknown>> {
+    const result = await this.get("/api/user/self");
+    if (!isRecord(result.data) || String(result.data.id) !== this.userId) {
+      throw new SubRouterError("invalid_response", "SubRouter account identity did not match");
+    }
+    return result.data;
+  }
+
+  async listActivity(params: {
+    page: number;
+    pageSize: number;
+    startTimestamp: number;
+    endTimestamp: number;
+  }): Promise<ActivityPage> {
+    const result = await this.get("/api/log/self", {
+      p: String(params.page),
+      page_size: String(params.pageSize),
+      type: "0",
+      start_timestamp: String(params.startTimestamp),
+      end_timestamp: String(params.endTimestamp),
+    });
+    if (!isRecord(result.data) || !Array.isArray(result.data.items)) {
+      throw new SubRouterError("invalid_response", "SubRouter activity response was invalid");
+    }
+    const items = result.data.items;
+    if (!items.every(isRecord)) {
+      throw new SubRouterError("invalid_response", "SubRouter activity contained an invalid record");
+    }
+    return {
+      page: nonNegativeSafeNumber(result.data.page, "data.page"),
+      pageSize: nonNegativeSafeNumber(result.data.page_size, "data.page_size"),
+      total: nonNegativeSafeNumber(result.data.total, "data.total"),
+      items,
+    };
+  }
+
+  async getStats(startTimestamp: number, endTimestamp: number): Promise<SupplierStats> {
+    const result = await this.get("/api/log/self/stat", {
+      type: "0",
+      start_timestamp: String(startTimestamp),
+      end_timestamp: String(endTimestamp),
+    });
+    if (!isRecord(result.data)) {
+      throw new SubRouterError("invalid_response", "SubRouter statistics response was invalid");
+    }
+    return {
+      quota: integerString(result.data.quota, "data.quota"),
+      token: integerString(result.data.token, "data.token"),
+    };
+  }
+
   async probeConnection(): Promise<SubRouterConnectionProbe> {
     const endTimestamp = Math.floor(Date.now() / 1000);
     const startTimestamp = endTimestamp - 60 * 60;
 
-    const account = await this.get("/api/user/self");
-    if (!isRecord(account.data) || String(account.data.id) !== this.userId) {
-      throw new SubRouterError("invalid_response", "SubRouter account identity did not match");
-    }
-
-    const activity = await this.get("/api/log/self", {
-      p: "1",
-      page_size: "1",
-      type: "0",
-      start_timestamp: String(startTimestamp),
-      end_timestamp: String(endTimestamp),
+    await this.getAccount();
+    const activity = await this.listActivity({
+      page: 1,
+      pageSize: 1,
+      startTimestamp,
+      endTimestamp,
     });
-    if (!isRecord(activity.data) || !Array.isArray(activity.data.items)) {
-      throw new SubRouterError("invalid_response", "SubRouter activity response was invalid");
-    }
-
-    const stats = await this.get("/api/log/self/stat", {
-      type: "0",
-      start_timestamp: String(startTimestamp),
-      end_timestamp: String(endTimestamp),
-    });
-    if (!isRecord(stats.data) || !("quota" in stats.data) || !("token" in stats.data)) {
-      throw new SubRouterError("invalid_response", "SubRouter statistics response was invalid");
-    }
+    await this.getStats(startTimestamp, endTimestamp);
 
     return {
       supplier: "subrouter",
       connected: true,
       checkedAt: new Date().toISOString(),
       endpoints: {
-        account: account.statusCode,
-        activity: activity.statusCode,
-        statistics: stats.statusCode,
+        account: 200,
+        activity: activity ? 200 : 500,
+        statistics: 200,
       },
     };
   }

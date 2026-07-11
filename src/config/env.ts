@@ -14,6 +14,8 @@ const schema = z.object({
   SUBROUTER_SESSION: z.string().min(1).optional(),
   SUBROUTER_USER_ID: z.string().min(1).optional(),
   SUBROUTER_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
+  SUBROUTER_SYNC_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(60000),
+  SUBROUTER_QUOTA_PER_USD: z.coerce.number().int().positive().default(500000),
 });
 
 export const env = schema.parse(process.env);

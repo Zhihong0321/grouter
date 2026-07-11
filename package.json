@@ -17,6 +17,7 @@
     "migrate:down": "node-pg-migrate -j sql down",
     "seed:admin": "tsx scripts/seed-admin.ts",
     "check:subrouter": "node dist/subrouterCheck.js",
+    "sync:subrouter": "node dist/subrouterSync.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -29,12 +30,14 @@
     "fastify": "^5.2.1",
     "fastify-plugin": "^5.0.1",
     "ioredis": "^5.4.2",
+    "json-bigint": "^1.0.0",
     "node-pg-migrate": "^7.9.1",
     "pg": "^8.13.1",
     "zod": "^3.24.1"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
+    "@types/json-bigint": "^1.0.4",
     "@types/node": "^22.10.5",
     "@types/pg": "^8.11.10",
     "tsx": "^4.19.2",
