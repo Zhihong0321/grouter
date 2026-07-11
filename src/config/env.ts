@@ -10,6 +10,10 @@ const schema = z.object({
   PORT: z.coerce.number().default(8787),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   DEBUG_TOKEN: z.string().optional(),
+  SUBROUTER_BASE_URL: z.string().url().default("https://subrouter.ai"),
+  SUBROUTER_SESSION: z.string().min(1).optional(),
+  SUBROUTER_USER_ID: z.string().min(1).optional(),
+  SUBROUTER_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
 });
 
 export const env = schema.parse(process.env);

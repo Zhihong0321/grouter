@@ -29,6 +29,7 @@ import modelsRoutes from "./routes/admin/models.js";
 import providersRoutes from "./routes/admin/providers.js";
 import modelRoutesRoutes from "./routes/admin/modelRoutes.js";
 import logsRoutes from "./routes/admin/logs.js";
+import supplierSyncRoutes from "./routes/admin/supplierSync.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -83,6 +84,7 @@ export async function buildApp() {
   await app.register(providersRoutes);
   await app.register(modelRoutesRoutes);
   await app.register(logsRoutes);
+  await app.register(supplierSyncRoutes);
 
   // dashboard/dist only exists after `pnpm build:dashboard` has run. Guard so
   // the backend (and tests, and `pnpm dev`) still work standalone before
