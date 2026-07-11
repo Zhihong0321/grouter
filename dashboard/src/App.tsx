@@ -8,6 +8,7 @@ import PriceTablePage from "./pages/PriceTablePage.js";
 import RouterPage from "./pages/RouterPage.js";
 import LogsPage from "./pages/LogsPage.js";
 import KeyTesterPage from "./pages/KeyTesterPage.js";
+import SupplierActivityPage from "./pages/SupplierActivityPage.js";
 
 export default function App() {
   const [authed, setAuthed] = useState<boolean | null>(null);
@@ -46,6 +47,7 @@ export default function App() {
         <Link to="/prices">Prices</Link>
         <Link to="/router">Router</Link>
         <Link to="/tester">Key Tester</Link>
+        <Link to="/supplier">SubRouter</Link>
         <Link to="/logs">Logs</Link>
         <span style={{ marginLeft: "auto" }}>
           <button className="secondary" onClick={logout}>Log out</button>
@@ -59,6 +61,7 @@ export default function App() {
           <Route path="/prices" element={<PriceTablePage />} />
           <Route path="/router" element={<RouterPage />} />
           <Route path="/tester" element={<KeyTesterPage />} />
+          <Route path="/supplier" element={<SupplierActivityPage />} />
           <Route path="/logs" element={<LogsPage />} />
         </Routes>
       </div>

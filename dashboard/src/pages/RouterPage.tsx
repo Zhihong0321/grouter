@@ -7,8 +7,10 @@ const CHINA_MODEL = /deepseek|qwen|glm|zhipu|kimi|moonshot|minimax|doubao|baichu
 const OPENAI_MODEL = /(^gpt-|^o[0-9]|openai)/i;
 
 function groupFor(model: SmartRoutingModelDto): ModelGroup {
-  if (model.brand.toLowerCase() === "anthropic" || model.modelId.startsWith("claude-")) return "anthropic";
-  if (model.brand.toLowerCase() === "openai" || OPENAI_MODEL.test(model.modelId)) return "openai";
+  if (model.modelId.startsWith("claude-")) return "anthropic";
+  if (OPENAI_MODEL.test(model.modelId)) return "openai";
+  if (model.brand.toLowerCase() === "anthropic") return "anthropic";
+  if (model.brand.toLowerCase() === "openai") return "openai";
   return CHINA_MODEL.test(`${model.brand} ${model.modelId}`) ? "china" : "other";
 }
 

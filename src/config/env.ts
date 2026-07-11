@@ -14,6 +14,9 @@ const schema = z.object({
   // The supplier console/session can live on a different host than the
   // OpenAI-compatible API endpoint used by an imported supplier key.
   SUBROUTER_UPSTREAM_BASE_URL: z.string().url().default("https://subrouter.ai"),
+  // Anthropic-compatible APIs can live on a different origin/path from the
+  // OpenAI endpoint even when they accept the same supplier key.
+  SUBROUTER_ANTHROPIC_BASE_URL: z.string().url().default("https://subrouter.ai"),
   SUBROUTER_SESSION: z.string().min(1).optional(),
   SUBROUTER_USER_ID: z.string().min(1).optional(),
   SUBROUTER_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),

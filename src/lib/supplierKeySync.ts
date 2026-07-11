@@ -19,6 +19,7 @@ export interface SupplierKeySyncOptions {
   pg: Pool;
   client: SubRouterClient;
   upstreamBaseUrl?: string;
+  anthropicBaseUrl?: string;
   now?: () => Date;
 }
 
@@ -197,8 +198,8 @@ async function fetchAllTokens(client: SubRouterClient): Promise<Record<string, u
   return tokens;
 }
 
-async function upsertToken(connection: PoolClient, key: MappedSupplierKey): Promise<{ id: string; providerId: string | null }> {
-  const { rows } = await connection.query<{ id: string; provider_id: string | null }>(
+async function upsertToken(connection: PoolClient, key: MappedSupplierKey): Promise<{ id: string; providerId: string | null; anthropicProviderId: string | null }> {
+  const { rows } = await connection.query<{ id: string; provider_id: string | null; anthropic_provider_id: string | null }>(
     `INSERT INTO reseller_supplier_keys (
        supplier, external_token_id, name, status, key_ciphertext, key_last4, user_id,
        created_at_supplier, accessed_at_supplier, expires_at_supplier, remaining_quota_units,
@@ -228,7 +229,7 @@ async function upsertToken(connection: PoolClient, key: MappedSupplierKey): Prom
        present_on_supplier = true,
        raw_token = EXCLUDED.raw_token,
        last_synced_at = now()
-     RETURNING id, provider_id`,
+     RETURNING id, provider_id, anthropic_provider_id`,
     [
       SUPPLIER, key.externalTokenId, key.name, key.status, key.keyCiphertext, key.keyLast4, key.userId,
       key.createdAt, key.accessedAt, key.expiresAt, key.remainingQuota, key.usedQuota,
@@ -236,32 +237,39 @@ async function upsertToken(connection: PoolClient, key: MappedSupplierKey): Prom
       key.crossGroupRetry, key.subrouterProviders, key.subrouterSortMode, key.rawTokenJson,
     ],
   );
-  return { id: rows[0].id, providerId: rows[0].provider_id };
+  return { id: rows[0].id, providerId: rows[0].provider_id, anthropicProviderId: rows[0].anthropic_provider_id };
 }
 
 async function ensureRoutingProvider(
   connection: PoolClient,
-  params: { supplierKeyId: string; providerId: string | null; key: MappedSupplierKey; upstreamBaseUrl: string },
+  params: {
+    supplierKeyId: string;
+    providerId: string | null;
+    providerColumn: "provider_id" | "anthropic_provider_id";
+    standard: "openai" | "anthropic";
+    key: MappedSupplierKey;
+    baseUrl: string;
+  },
 ): Promise<void> {
-  const name = `SubRouter · ${params.key.name}`;
+  const name = `SubRouter · ${params.key.name} · ${params.standard === "anthropic" ? "Anthropic" : "OpenAI"}`;
   const active = params.key.status === 1;
 
   if (params.providerId) {
     const updated = await connection.query(
       `UPDATE reseller_providers
-       SET name = $2, standard = 'openai', base_url = $3, api_key_encrypted = $4, active = $5
+       SET name = $2, standard = $3, base_url = $4, api_key_encrypted = $5, active = $6
        WHERE id = $1`,
-      [params.providerId, name, params.upstreamBaseUrl, params.key.keyCiphertext, active],
+      [params.providerId, name, params.standard, params.baseUrl, params.key.keyCiphertext, active],
     );
     if (updated.rowCount === 1) return;
   }
 
   const created = await connection.query<{ id: string }>(
     `INSERT INTO reseller_providers (name, standard, base_url, api_key_encrypted, active)
-     VALUES ($1, 'openai', $2, $3, $4) RETURNING id`,
-    [name, params.upstreamBaseUrl, params.key.keyCiphertext, active],
+     VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+    [name, params.standard, params.baseUrl, params.key.keyCiphertext, active],
   );
-  await connection.query("UPDATE reseller_supplier_keys SET provider_id = $1 WHERE id = $2", [created.rows[0].id, params.supplierKeyId]);
+  await connection.query(`UPDATE reseller_supplier_keys SET ${params.providerColumn} = $1 WHERE id = $2`, [created.rows[0].id, params.supplierKeyId]);
 }
 
 async function replaceKeyModels(connection: PoolClient, supplierKeyId: string, modelIds: string[]): Promise<void> {
@@ -328,7 +336,7 @@ export async function syncAllSupplierKeys(options: SupplierKeySyncOptions): Prom
       await connection.query(
         `UPDATE reseller_providers p SET active = false
          FROM reseller_supplier_keys k
-         WHERE k.supplier = $1 AND k.provider_id = p.id`,
+         WHERE k.supplier = $1 AND (k.provider_id = p.id OR k.anthropic_provider_id = p.id)`,
         [SUPPLIER],
       );
       for (const key of keys) {
@@ -336,8 +344,18 @@ export async function syncAllSupplierKeys(options: SupplierKeySyncOptions): Prom
         await ensureRoutingProvider(connection, {
           supplierKeyId: localKey.id,
           providerId: localKey.providerId,
+          providerColumn: "provider_id",
+          standard: "openai",
           key,
-          upstreamBaseUrl: options.upstreamBaseUrl ?? "https://subrouter.ai",
+          baseUrl: options.upstreamBaseUrl ?? "https://subrouter.ai",
+        });
+        await ensureRoutingProvider(connection, {
+          supplierKeyId: localKey.id,
+          providerId: localKey.anthropicProviderId,
+          providerColumn: "anthropic_provider_id",
+          standard: "anthropic",
+          key,
+          baseUrl: options.anthropicBaseUrl ?? options.upstreamBaseUrl ?? "https://subrouter.ai",
         });
       }
       await syncCatalog(connection, models);
@@ -359,7 +377,7 @@ export async function syncAllSupplierKeys(options: SupplierKeySyncOptions): Prom
       keyCount: keys.length,
       modelCount: models.size,
       restrictedKeyCount: keys.filter((key) => key.modelLimitsEnabled).length,
-      routingProviderCount: keys.length,
+      routingProviderCount: keys.length * 2,
       syncedAt: (options.now?.() ?? new Date()).toISOString(),
     };
   } catch (error) {

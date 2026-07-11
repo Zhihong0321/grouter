@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { env } from "../../config/env.js";
 import { SubRouterClient, SubRouterError } from "../../lib/subrouterClient.js";
 import { SupplierKeySyncError, syncAllSupplierKeys, syncAvailableModelsFromSupplierKeys } from "../../lib/supplierKeySync.js";
+import { SupplierSyncError, syncAllSupplierActivity } from "../../lib/supplierSync.js";
 import { syncSmartRoutes } from "../../lib/smartRouting.js";
 import { requireAdmin } from "./auth.js";
 
@@ -135,6 +136,64 @@ const supplierSyncRoutes: FastifyPluginAsync = async (app) => {
     };
   });
 
+  app.get("/admin/api/supplier-sync/activity", { preHandler: requireAdmin }, async () => {
+    const [accountResult, stateResult, summaryResult, activityResult] = await Promise.all([
+      app.pg.query("SELECT * FROM reseller_supplier_account_state WHERE supplier = $1", ["subrouter"]),
+      app.pg.query("SELECT * FROM reseller_supplier_sync_state WHERE supplier = $1", ["subrouter"]),
+      app.pg.query(
+        `SELECT
+           COUNT(*)::text AS activity_count,
+           COALESCE(SUM(wallet_cost_usd), 0)::text AS total_cost_usd,
+           COALESCE(SUM(prompt_tokens + completion_tokens), 0)::text AS total_tokens
+         FROM reseller_supplier_activity WHERE supplier = $1`,
+        ["subrouter"],
+      ),
+      app.pg.query(
+        `SELECT external_created_at, token_name, model_name, prompt_tokens, completion_tokens,
+                cache_tokens, wallet_cost_usd, supplier_group, provider_name, channel_name,
+                external_request_id, external_log_id
+         FROM reseller_supplier_activity
+         WHERE supplier = $1
+         ORDER BY external_created_at DESC, external_log_id DESC
+         LIMIT 200`,
+        ["subrouter"],
+      ),
+    ]);
+    const account = accountResult.rows[0];
+    const summary = summaryResult.rows[0];
+    return {
+      supplier: "subrouter",
+      sync: syncStateDto(stateResult.rows[0]),
+      account: account ? {
+        remainingQuotaUnits: account.remaining_quota_units,
+        usedQuotaUnits: account.used_quota_units,
+        remainingWalletUsd: account.remaining_wallet_usd,
+        usedWalletUsd: account.used_wallet_usd,
+        requestCount: account.request_count,
+        lastFetchedAt: account.last_fetched_at,
+      } : null,
+      summary: {
+        activityCount: summary.activity_count,
+        totalCostUsd: summary.total_cost_usd,
+        totalTokens: summary.total_tokens,
+      },
+      activity: activityResult.rows.map((row) => ({
+        createdAt: row.external_created_at,
+        tokenName: row.token_name,
+        modelName: row.model_name,
+        promptTokens: row.prompt_tokens,
+        completionTokens: row.completion_tokens,
+        cacheTokens: row.cache_tokens,
+        costUsd: row.wallet_cost_usd,
+        group: row.supplier_group,
+        providerName: row.provider_name,
+        channelName: row.channel_name,
+        requestId: row.external_request_id,
+        logId: row.external_log_id,
+      })),
+    };
+  });
+
   // This is deliberately a one-way import: it never creates, edits, or
   // revokes any supplier key on SubRouter.
   app.post("/admin/api/supplier-sync/keys", { preHandler: requireAdmin }, async (_request, reply) => {
@@ -155,7 +214,12 @@ const supplierSyncRoutes: FastifyPluginAsync = async (app) => {
     });
 
     try {
-      const result = await syncAllSupplierKeys({ pg: app.pg, client, upstreamBaseUrl: env.SUBROUTER_UPSTREAM_BASE_URL });
+      const result = await syncAllSupplierKeys({
+        pg: app.pg,
+        client,
+        upstreamBaseUrl: env.SUBROUTER_UPSTREAM_BASE_URL,
+        anthropicBaseUrl: env.SUBROUTER_ANTHROPIC_BASE_URL,
+      });
       return { synchronized: true, ...result };
     } catch (error) {
       const known = error instanceof SubRouterError || error instanceof SupplierKeySyncError;
@@ -201,7 +265,12 @@ const supplierSyncRoutes: FastifyPluginAsync = async (app) => {
       timeoutMs: env.SUBROUTER_SYNC_REQUEST_TIMEOUT_MS,
     });
     try {
-      const keys = await syncAllSupplierKeys({ pg: app.pg, client, upstreamBaseUrl: env.SUBROUTER_UPSTREAM_BASE_URL });
+      const keys = await syncAllSupplierKeys({
+        pg: app.pg,
+        client,
+        upstreamBaseUrl: env.SUBROUTER_UPSTREAM_BASE_URL,
+        anthropicBaseUrl: env.SUBROUTER_ANTHROPIC_BASE_URL,
+      });
       const models = await syncAvailableModelsFromSupplierKeys({ pg: app.pg, upstreamBaseUrl: env.SUBROUTER_UPSTREAM_BASE_URL });
       const routes = await syncSmartRoutes(app.pg);
       app.routerCache.invalidate();
@@ -239,6 +308,34 @@ const supplierSyncRoutes: FastifyPluginAsync = async (app) => {
       active: row.active,
       routes: row.routes,
     }));
+  });
+
+  app.post("/admin/api/supplier-sync/activity", { preHandler: requireAdmin }, async (_request, reply) => {
+    if (!env.SUBROUTER_SESSION || !env.SUBROUTER_USER_ID) {
+      return reply.code(503).send({ supplier: "subrouter", synchronized: false, errorType: "not_configured", error: "SubRouter credentials are not configured" });
+    }
+    const client = new SubRouterClient({
+      baseUrl: env.SUBROUTER_BASE_URL,
+      session: env.SUBROUTER_SESSION,
+      userId: env.SUBROUTER_USER_ID,
+      timeoutMs: env.SUBROUTER_SYNC_REQUEST_TIMEOUT_MS,
+    });
+    try {
+      const result = await syncAllSupplierActivity({
+        pg: app.pg,
+        client,
+        quotaPerUsd: String(env.SUBROUTER_QUOTA_PER_USD),
+      });
+      return { synchronized: true, ...result };
+    } catch (error) {
+      const known = error instanceof SubRouterError || error instanceof SupplierSyncError;
+      return reply.code(error instanceof SupplierSyncError && error.type === "already_running" ? 409 : 502).send({
+        supplier: "subrouter",
+        synchronized: false,
+        errorType: known ? error.type : "unknown",
+        error: known ? error.message : "SubRouter activity synchronization failed",
+      });
+    }
   });
 };
 

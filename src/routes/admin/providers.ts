@@ -51,7 +51,7 @@ const providersSelect = `
   SELECT p.*, k.id AS supplier_key_id,
     COALESCE(json_agg(m.model_id ORDER BY m.model_id) FILTER (WHERE m.model_id IS NOT NULL), '[]'::json) AS supplier_key_models
   FROM reseller_providers p
-  LEFT JOIN reseller_supplier_keys k ON k.provider_id = p.id
+  LEFT JOIN reseller_supplier_keys k ON k.provider_id = p.id OR k.anthropic_provider_id = p.id
   LEFT JOIN reseller_supplier_key_models m ON m.supplier_key_id = k.id
   GROUP BY p.id, k.id`;
 
@@ -216,7 +216,7 @@ const providersRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const { rows: supplierRows } = await app.pg.query(
-      "SELECT id FROM reseller_supplier_keys WHERE provider_id = $1 AND present_on_supplier = true",
+      "SELECT id FROM reseller_supplier_keys WHERE (provider_id = $1 OR anthropic_provider_id = $1) AND present_on_supplier = true",
       [provider.id],
     );
     if (supplierRows.length > 0) {

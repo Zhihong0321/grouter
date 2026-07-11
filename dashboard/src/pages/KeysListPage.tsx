@@ -59,6 +59,12 @@ export default function KeysListPage() {
     await load();
   };
 
+  const remove = async (id: string) => {
+    if (!confirm("Remove this customer API key from the dashboard? It will be permanently revoked and its recoverable plaintext will be destroyed. Historical usage logs stay intact.")) return;
+    await api.removeKey(id);
+    await load();
+  };
+
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -112,6 +118,7 @@ export default function KeysListPage() {
               <td>{centsToDollars(k.spentCents)}</td>
               <td>
                 {k.status === "active" && <button className="danger" onClick={() => revoke(k.id)}>Revoke</button>}
+                <button className="danger" style={{ marginLeft: 6 }} onClick={() => remove(k.id)}>Remove</button>
               </td>
             </tr>
           ))}

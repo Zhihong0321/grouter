@@ -228,6 +228,55 @@ export interface SmartRoutingSyncResultDto {
   routes: { addedRouteCount: number; reactivatedRouteCount: number; deactivatedRouteCount: number; routedModelCount: number };
 }
 
+export interface SupplierActivityDto {
+  createdAt: string;
+  tokenName: string | null;
+  modelName: string | null;
+  promptTokens: string;
+  completionTokens: string;
+  cacheTokens: string;
+  costUsd: string;
+  group: string | null;
+  providerName: string | null;
+  channelName: string | null;
+  requestId: string | null;
+  logId: string;
+}
+
+export interface SupplierActivityDashboardDto {
+  supplier: "subrouter";
+  sync: {
+    lastSuccessAt: string | null;
+    lastAttemptAt: string | null;
+    lastErrorType: string | null;
+    lastError: string | null;
+    lastImportedCount: number;
+    totalImportedCount: string;
+    reconciliationMatched: boolean | null;
+  } | null;
+  account: {
+    remainingQuotaUnits: string;
+    usedQuotaUnits: string;
+    remainingWalletUsd: string;
+    usedWalletUsd: string;
+    requestCount: string;
+    lastFetchedAt: string;
+  } | null;
+  summary: { activityCount: string; totalCostUsd: string; totalTokens: string };
+  activity: SupplierActivityDto[];
+}
+
+export interface SupplierActivitySyncResultDto {
+  synchronized: true;
+  supplier: "subrouter";
+  fetchedCount: number;
+  importedCount: number;
+  totalStoredCount: number;
+  reconciliationMatched: true;
+  quotaUnits: string;
+  tokenCount: string;
+}
+
 export interface RequestLogDto {
   id: string;
   created_at: string;
@@ -262,6 +311,7 @@ export const api = {
   updateKey: (id: string, body: Partial<{ name: string; rateLimitRpm: number; budgetCents: number; modelRestrictions: string[] | null }>) =>
     request<ApiKeyDto>(`/keys/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   revokeKey: (id: string) => request<ApiKeyDto>(`/keys/${id}/revoke`, { method: "POST" }),
+  removeKey: (id: string) => request<void>(`/keys/${id}`, { method: "DELETE" }),
 
   getKeyUsage: (id: string, range: "7d" | "30d") => request<UsageResponse>(`/keys/${id}/usage?range=${range}`),
 
@@ -295,6 +345,8 @@ export const api = {
   syncSupplierAvailableModels: () => request<SupplierAvailableModelSyncResultDto>("/supplier-sync/available-models", { method: "POST" }),
   syncSmartRouting: () => request<SmartRoutingSyncResultDto>("/supplier-sync/smart-routing", { method: "POST" }),
   getSmartRouting: () => request<SmartRoutingModelDto[]>("/smart-routing"),
+  getSupplierActivity: () => request<SupplierActivityDashboardDto>("/supplier-sync/activity"),
+  syncSupplierActivity: () => request<SupplierActivitySyncResultDto>("/supplier-sync/activity", { method: "POST" }),
 
   getModelRoutes: (modelId: string) => request<ModelRouteDto[]>(`/models/${modelId}/routes`),
   putModelRoutes: (modelId: string, routes: { providerId: string; upstreamModelId: string; priority: number }[]) =>

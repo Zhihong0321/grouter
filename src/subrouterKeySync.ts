@@ -23,6 +23,7 @@ if (!env.SUBROUTER_SESSION || !env.SUBROUTER_USER_ID) {
         timeoutMs: env.SUBROUTER_SYNC_REQUEST_TIMEOUT_MS,
       }),
       upstreamBaseUrl: env.SUBROUTER_UPSTREAM_BASE_URL,
+      anthropicBaseUrl: env.SUBROUTER_ANTHROPIC_BASE_URL,
     });
     console.log(JSON.stringify({ synchronized: true, ...result }));
   } catch (error) {

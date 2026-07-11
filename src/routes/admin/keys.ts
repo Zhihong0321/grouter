@@ -54,18 +54,18 @@ const keysRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.get("/admin/api/keys", async () => {
-    const { rows } = await app.pg.query("SELECT * FROM reseller_api_keys ORDER BY created_at DESC");
+    const { rows } = await app.pg.query("SELECT * FROM reseller_api_keys WHERE deleted_at IS NULL ORDER BY created_at DESC");
     return rows.map(rowToDto);
   });
 
   app.get<{ Params: { id: string } }>("/admin/api/keys/:id", async (request, reply) => {
-    const { rows } = await app.pg.query("SELECT * FROM reseller_api_keys WHERE id = $1", [request.params.id]);
+    const { rows } = await app.pg.query("SELECT * FROM reseller_api_keys WHERE id = $1 AND deleted_at IS NULL", [request.params.id]);
     if (rows.length === 0) return reply.code(404).send({ error: "Not found" });
     return rowToDto(rows[0]);
   });
 
   app.patch<{ Params: { id: string }; Body: UpdateKeyBody }>("/admin/api/keys/:id", async (request, reply) => {
-    const { rows: existingRows } = await app.pg.query("SELECT * FROM reseller_api_keys WHERE id = $1", [request.params.id]);
+    const { rows: existingRows } = await app.pg.query("SELECT * FROM reseller_api_keys WHERE id = $1 AND deleted_at IS NULL", [request.params.id]);
     if (existingRows.length === 0) return reply.code(404).send({ error: "Not found" });
 
     const current = existingRows[0];
@@ -86,13 +86,29 @@ const keysRoutes: FastifyPluginAsync = async (app) => {
 
   app.post<{ Params: { id: string } }>("/admin/api/keys/:id/revoke", async (request, reply) => {
     const { rows } = await app.pg.query(
-      "UPDATE reseller_api_keys SET status = 'revoked', revoked_at = now() WHERE id = $1 RETURNING *",
+      "UPDATE reseller_api_keys SET status = 'revoked', revoked_at = now() WHERE id = $1 AND deleted_at IS NULL RETURNING *",
       [request.params.id],
     );
     if (rows.length === 0) return reply.code(404).send({ error: "Not found" });
 
     await invalidateKeyCache(app.redis, rows[0].key_hash);
     return rowToDto(rows[0]);
+  });
+
+  // Keep historical usage rows intact, but remove the customer key from every
+  // admin list and destroy the recoverable plaintext immediately.
+  app.delete<{ Params: { id: string } }>("/admin/api/keys/:id", async (request, reply) => {
+    const { rows } = await app.pg.query(
+      `UPDATE reseller_api_keys
+       SET status = 'revoked', revoked_at = COALESCE(revoked_at, now()), deleted_at = now(), key_ciphertext = NULL
+       WHERE id = $1 AND deleted_at IS NULL
+       RETURNING *`,
+      [request.params.id],
+    );
+    if (rows.length === 0) return reply.code(404).send({ error: "Not found" });
+    await invalidateKeyCache(app.redis, rows[0].key_hash);
+    await invalidateBudgetCache(app.redis, request.params.id);
+    return reply.code(204).send();
   });
 };
 

@@ -24,7 +24,7 @@ export async function syncSmartRoutes(pg: Pool): Promise<SmartRouteSyncResult> {
       `UPDATE reseller_model_routes r
        SET active = false
        FROM reseller_supplier_keys k
-       WHERE k.provider_id = r.provider_id
+       WHERE (k.provider_id = r.provider_id OR k.anthropic_provider_id = r.provider_id)
          AND r.active = true
          AND (
            k.present_on_supplier = false OR k.status <> 1 OR NOT EXISTS (
@@ -39,7 +39,7 @@ export async function syncSmartRoutes(pg: Pool): Promise<SmartRouteSyncResult> {
        FROM reseller_models m
        JOIN reseller_supplier_key_models km ON km.model_id = m.model_id
        JOIN reseller_supplier_keys k ON k.id = km.supplier_key_id
-       JOIN reseller_providers p ON p.id = k.provider_id
+       JOIN reseller_providers p ON p.id = k.provider_id OR p.id = k.anthropic_provider_id
        WHERE m.active = true
          AND k.present_on_supplier = true AND k.status = 1
          AND p.active = true AND p.standard = m.standard`,
