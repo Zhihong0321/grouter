@@ -10,6 +10,7 @@ const baseConfig: TierConfig = {
   longContextTokens: 60_000,
   shortTurnTokens: 1_500,
   mode: "smart",
+  honorExplicitRoutine: false,
 };
 
 const baseSignals: Signals = {
@@ -75,6 +76,30 @@ describe("decideTier", () => {
     const decision = decideTier(sig, baseConfig);
     expect(decision.ruleId).toBe("default");
     expect(decision.chosenTier).toBe("build");
+  });
+
+  it("honorExplicitRoutine off (default): a long/tool-heavy explicit routine ask is NOT pinned to routine", () => {
+    const sig: Signals = { ...baseSignals, requestedTier: "routine", inputTokens: 5_000, hasTools: true };
+    const decision = decideTier(sig, baseConfig);
+    expect(decision.ruleId).toBe("default");
+    expect(decision.chosenTier).toBe("build");
+  });
+
+  it("honorExplicitRoutine on: pins a long/tool-heavy explicit routine ask to routine", () => {
+    const cfg: TierConfig = { ...baseConfig, honorExplicitRoutine: true };
+    const sig: Signals = { ...baseSignals, requestedTier: "routine", inputTokens: 5_000, hasTools: true };
+    const decision = decideTier(sig, cfg);
+    expect(decision.ruleId).toBe("explicit_routine");
+    expect(decision.chosenTier).toBe("routine");
+    expect(decision.wasOverridden).toBe(false);
+  });
+
+  it("honorExplicitRoutine on: thinking/long-context signals still override to brain", () => {
+    const cfg: TierConfig = { ...baseConfig, honorExplicitRoutine: true };
+    const sig: Signals = { ...baseSignals, requestedTier: "routine", thinkingEnabled: true };
+    const decision = decideTier(sig, cfg);
+    expect(decision.ruleId).toBe("thinking");
+    expect(decision.chosenTier).toBe("brain");
   });
 
   it("defaults to build when nothing else matches", () => {

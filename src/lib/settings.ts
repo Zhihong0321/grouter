@@ -12,6 +12,7 @@ export const SETTINGS_KEYS = {
   TIER_SHORT_TURN_TOKENS: "tier_short_turn_tokens",
   TIER_SMALL_FAST_MODEL: "tier_small_fast_model",
   TIER_ROUTING_MODE: "tier_routing_mode",
+  TIER_HONOR_EXPLICIT_ROUTINE: "tier_honor_explicit_routine",
 } as const;
 
 const DEFAULT_TIER_CONFIG: TierConfig = {
@@ -23,6 +24,7 @@ const DEFAULT_TIER_CONFIG: TierConfig = {
   longContextTokens: 60_000,
   shortTurnTokens: 1_500,
   mode: "smart",
+  honorExplicitRoutine: false,
 };
 
 const DEFAULT_SMALL_FAST_MODEL = "claude-haiku-4-5";
@@ -80,6 +82,7 @@ export class SettingsCache {
       longContextTokens: Number(this.cache.get(SETTINGS_KEYS.TIER_LONG_CONTEXT_TOKENS) ?? DEFAULT_TIER_CONFIG.longContextTokens),
       shortTurnTokens: Number(this.cache.get(SETTINGS_KEYS.TIER_SHORT_TURN_TOKENS) ?? DEFAULT_TIER_CONFIG.shortTurnTokens),
       mode: mode === "honor_tier" ? "honor_tier" : "smart",
+      honorExplicitRoutine: (this.cache.get(SETTINGS_KEYS.TIER_HONOR_EXPLICIT_ROUTINE) ?? String(DEFAULT_TIER_CONFIG.honorExplicitRoutine)) === "true",
     };
   }
 

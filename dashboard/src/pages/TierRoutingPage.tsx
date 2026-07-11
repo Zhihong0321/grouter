@@ -20,7 +20,18 @@ export default function TierRoutingPage() {
 
   if (!config) return <p>Loading…</p>;
 
-  const save = async (patch: Partial<{ brainModel: string; buildModel: string; routineModel: string; longContextTokens: number; shortTurnTokens: number; smallFastModelName: string; mode: "smart" | "honor_tier" }>) => {
+  const save = async (
+    patch: Partial<{
+      brainModel: string;
+      buildModel: string;
+      routineModel: string;
+      longContextTokens: number;
+      shortTurnTokens: number;
+      smallFastModelName: string;
+      mode: "smart" | "honor_tier";
+      honorExplicitRoutine: boolean;
+    }>,
+  ) => {
     setSaving(true);
     setError(null);
     try {
@@ -79,6 +90,17 @@ export default function TierRoutingPage() {
             <option value="smart">Smart -- run the full rule set</option>
             <option value="honor_tier">Honor tier -- global off-switch, always serve the requested tier</option>
           </select>
+        </div>
+        <div className="form-row" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <input
+            type="checkbox"
+            id="honor-explicit-routine"
+            checked={config.honorExplicitRoutine}
+            onChange={(e) => save({ honorExplicitRoutine: e.target.checked })}
+          />
+          <label htmlFor="honor-explicit-routine">
+            Honor explicit routine tier (e.g. Codex low reasoning effort) even on long or tool-heavy turns
+          </label>
         </div>
       </div>
 

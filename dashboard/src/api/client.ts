@@ -47,6 +47,7 @@ export interface TierConfigDto {
   shortTurnTokens: number;
   smallFastModelName: string;
   mode: "smart" | "honor_tier";
+  honorExplicitRoutine: boolean;
 }
 
 export interface TierRoutingSavingsDto {
@@ -390,8 +391,18 @@ export const api = {
     request<ModelRouteDto[]>(`/models/${modelId}/routes/priority`, { method: "PUT", body: JSON.stringify({ providerIds }) }),
 
   getTierRoutingConfig: () => request<TierConfigDto>("/tier-routing/config"),
-  updateTierRoutingConfig: (body: Partial<{ brainModel: string; buildModel: string; routineModel: string; longContextTokens: number; shortTurnTokens: number; smallFastModelName: string; mode: "smart" | "honor_tier" }>) =>
-    request<TierConfigDto>("/tier-routing/config", { method: "PATCH", body: JSON.stringify(body) }),
+  updateTierRoutingConfig: (
+    body: Partial<{
+      brainModel: string;
+      buildModel: string;
+      routineModel: string;
+      longContextTokens: number;
+      shortTurnTokens: number;
+      smallFastModelName: string;
+      mode: "smart" | "honor_tier";
+      honorExplicitRoutine: boolean;
+    }>,
+  ) => request<TierConfigDto>("/tier-routing/config", { method: "PATCH", body: JSON.stringify(body) }),
   getTierRoutingSavings: () => request<TierRoutingSavingsDto[]>("/tier-routing/savings"),
 
   listRequestLogs: (filters: { limit?: number; model?: string; outcome?: string; keyId?: string } = {}) => {

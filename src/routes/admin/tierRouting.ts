@@ -14,6 +14,7 @@ interface UpdateTierConfigBody {
   shortTurnTokens?: number;
   smallFastModelName?: string;
   mode?: "smart" | "honor_tier";
+  honorExplicitRoutine?: boolean;
 }
 
 const tierRoutingRoutes: FastifyPluginAsync = async (app) => {
@@ -26,7 +27,7 @@ const tierRoutingRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.patch<{ Body: UpdateTierConfigBody }>("/admin/api/tier-routing/config", async (request) => {
-    const { brainModel, buildModel, routineModel, longContextTokens, shortTurnTokens, smallFastModelName, mode } = request.body;
+    const { brainModel, buildModel, routineModel, longContextTokens, shortTurnTokens, smallFastModelName, mode, honorExplicitRoutine } = request.body;
 
     if (brainModel) await app.settingsCache.set(app.pg, SETTINGS_KEYS.TIER_MODEL_BRAIN, brainModel);
     if (buildModel) await app.settingsCache.set(app.pg, SETTINGS_KEYS.TIER_MODEL_BUILD, buildModel);
@@ -35,6 +36,7 @@ const tierRoutingRoutes: FastifyPluginAsync = async (app) => {
     if (shortTurnTokens !== undefined) await app.settingsCache.set(app.pg, SETTINGS_KEYS.TIER_SHORT_TURN_TOKENS, String(shortTurnTokens));
     if (smallFastModelName) await app.settingsCache.set(app.pg, SETTINGS_KEYS.TIER_SMALL_FAST_MODEL, smallFastModelName);
     if (mode) await app.settingsCache.set(app.pg, SETTINGS_KEYS.TIER_ROUTING_MODE, mode);
+    if (honorExplicitRoutine !== undefined) await app.settingsCache.set(app.pg, SETTINGS_KEYS.TIER_HONOR_EXPLICIT_ROUTINE, String(honorExplicitRoutine));
 
     const tierConfig = await app.settingsCache.getTierConfig();
     return { ...tierConfig, smallFastModelName: await app.settingsCache.getSmallFastModelName() };

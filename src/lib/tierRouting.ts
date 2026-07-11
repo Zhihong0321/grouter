@@ -11,6 +11,11 @@ export interface TierConfig {
    * to whatever tier the client's requested model already maps to, without
    * running the rest of the rules. */
   mode: "smart" | "honor_tier";
+  /** When true, an explicit routine-tier ask (e.g. Codex reasoning.effort:
+   * "low") is never upgraded past routine, even on a long or tool-heavy turn.
+   * Off by default: thinking/long-context/short-turn signals still decide,
+   * same as any other requested tier. */
+  honorExplicitRoutine: boolean;
 }
 
 export type RuleId =
@@ -19,6 +24,7 @@ export type RuleId =
   | "thinking"
   | "long_context"
   | "explicit_brain"
+  | "explicit_routine"
   | "short_turn"
   | "default"
   // Handler-level fallbacks -- decideTier() never produces these itself,
@@ -56,6 +62,7 @@ export function decideTier(sig: Signals, cfg: TierConfig): RoutingDecision {
   if (sig.thinkingEnabled) return finish("brain", "thinking");
   if (sig.inputTokens > cfg.longContextTokens) return finish("brain", "long_context");
   if (sig.requestedTier === "brain") return finish("brain", "explicit_brain");
+  if (cfg.honorExplicitRoutine && sig.requestedTier === "routine") return finish("routine", "explicit_routine");
   if (sig.inputTokens < cfg.shortTurnTokens && !sig.hasTools) return finish("routine", "short_turn");
   return finish("build", "default");
 }
