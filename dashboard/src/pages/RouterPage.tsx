@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, type SettingsDto, type ModelDto, type ProviderDto, type ModelRouteDto, type ProviderHealthDto, type OpenAiEndpointTestResultDto, type OpenAiStreamingTestResultDto } from "../api/client.js";
+import { api, type SettingsDto, type ModelDto, type ProviderDto, type ModelRouteDto, type ProviderHealthDto, type OpenAiEndpointTestResultDto, type OpenAiStreamingTestResultDto, type SupplierKeySyncDto } from "../api/client.js";
 
 export default function RouterPage() {
   const [settings, setSettings] = useState<SettingsDto | null>(null);
@@ -30,6 +30,11 @@ export default function RouterPage() {
   const [streamingTestErrors, setStreamingTestErrors] = useState<Record<string, string>>({});
   const [testingStreamingProvider, setTestingStreamingProvider] = useState<string | null>(null);
 
+  const [supplierKeys, setSupplierKeys] = useState<SupplierKeySyncDto | null>(null);
+  const [syncingSupplierKeys, setSyncingSupplierKeys] = useState(false);
+  const [syncingSupplierModels, setSyncingSupplierModels] = useState(false);
+  const [supplierSyncMessage, setSupplierSyncMessage] = useState<string | null>(null);
+
   const [selectedModelId, setSelectedModelId] = useState("");
   const [routes, setRoutes] = useState<ModelRouteDto[]>([]);
   const [routesDirty, setRoutesDirty] = useState(false);
@@ -47,6 +52,7 @@ export default function RouterPage() {
       setSelectedModelId((prev) => prev || ms[0]?.modelId || "");
     });
   const loadProviders = () => api.listProviders().then(setProviders);
+  const loadSupplierKeys = () => api.getSupplierKeys().then(setSupplierKeys);
   const loadRoutes = (modelId: string) => {
     if (!modelId) return;
     api.getModelRoutes(modelId).then((r) => {
@@ -59,6 +65,7 @@ export default function RouterPage() {
     loadSettings();
     loadModels();
     loadProviders();
+    loadSupplierKeys().catch((err) => setError(err instanceof Error ? err.message : "Failed to load SubRouter keys"));
   }, []);
 
   useEffect(() => {
@@ -204,6 +211,39 @@ export default function RouterPage() {
     }
   };
 
+  const syncSupplierKeys = async () => {
+    setError(null);
+    setSupplierSyncMessage(null);
+    setSyncingSupplierKeys(true);
+    try {
+      const result = await api.syncSupplierKeys();
+      setSupplierSyncMessage(`Synced ${result.keyCount} keys and created ${result.routingProviderCount} routing providers. Next, sync their available models.`);
+      await Promise.all([loadSupplierKeys(), loadProviders()]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to synchronize SubRouter keys");
+    } finally {
+      setSyncingSupplierKeys(false);
+    }
+  };
+
+  const syncSupplierAvailableModels = async () => {
+    setError(null);
+    setSupplierSyncMessage(null);
+    setSyncingSupplierModels(true);
+    try {
+      const result = await api.syncSupplierAvailableModels();
+      const conflicts = result.conflictingModelIds.length
+        ? ` ${result.conflictingModelIds.length} existing Anthropic-standard model(s) were left unchanged.`
+        : "";
+      setSupplierSyncMessage(`Synced ${result.availableModelCount} live models from ${result.keyCount} keys; ${result.addedToRoutingCatalog} added to routing.${conflicts}`);
+      await Promise.all([loadSupplierKeys(), loadProviders(), loadModels()]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to synchronize available SubRouter models");
+    } finally {
+      setSyncingSupplierModels(false);
+    }
+  };
+
   const renumber = (list: ModelRouteDto[]): ModelRouteDto[] => list.map((r, i) => ({ ...r, priority: i + 1 }));
 
   const addRouteProvider = () => {
@@ -263,9 +303,10 @@ export default function RouterPage() {
   };
 
   const selectedModel = models.find((m) => m.modelId === selectedModelId);
-  const availableProviders = providers.filter(
-    (p) => !routes.some((r) => r.providerId === p.id) && (!selectedModel || p.standard === selectedModel.standard),
-  );
+  const availableProviders = providers.filter((p) => {
+    if (routes.some((r) => r.providerId === p.id) || (selectedModel && p.standard !== selectedModel.standard)) return false;
+    return !p.supplierKeyModelIds || !selectedModel || p.supplierKeyModelIds.includes(selectedModel.modelId);
+  });
 
   if (!settings) return <p>Loading…</p>;
 
@@ -277,6 +318,77 @@ export default function RouterPage() {
         each model, in priority order — priority 1 is tried first, the rest are automatic failover backups.
       </p>
       {error && <p style={{ color: "#ff8080" }}>{error}</p>}
+
+      <div className="card">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <div>
+            <h3 style={{ margin: 0 }}>SubRouter key mirror</h3>
+            <p style={{ color: "#9aa4b2", marginBottom: 0, fontSize: 13 }}>
+              Read-only copy of supplier keys and their allowed models. Supplier keys are kept separate from customer keys.
+            </p>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button type="button" onClick={syncSupplierKeys} disabled={syncingSupplierKeys || syncingSupplierModels}>
+              {syncingSupplierKeys ? "Syncing…" : "Sync SubRouter keys"}
+            </button>
+            <button type="button" className="secondary" onClick={syncSupplierAvailableModels} disabled={syncingSupplierKeys || syncingSupplierModels}>
+              {syncingSupplierModels ? "Syncing models…" : "Sync available models from all keys"}
+            </button>
+          </div>
+        </div>
+        {supplierKeys?.sync && (
+          <p style={{ color: supplierKeys.sync.lastError ? "#ff8080" : "#9aa4b2", fontSize: 13, marginBottom: 0 }}>
+            {supplierKeys.sync.lastError
+              ? `Last sync failed: ${supplierKeys.sync.lastError}`
+              : supplierKeys.sync.lastSuccessAt
+                ? `Last synced: ${new Date(supplierKeys.sync.lastSuccessAt).toLocaleString()} — ${supplierKeys.sync.lastKeyCount} keys, ${supplierKeys.catalogModelCount} supplier models.`
+                : "Not synchronized yet."}
+          </p>
+        )}
+        {supplierKeys?.sync?.lastModelSyncSuccessAt && (
+          <p style={{ color: supplierKeys.sync.lastModelSyncError ? "#ff8080" : "#9aa4b2", fontSize: 13, marginBottom: 0 }}>
+            {supplierKeys.sync.lastModelSyncError
+              ? `Available-model sync failed: ${supplierKeys.sync.lastModelSyncError}`
+              : `Live available models: ${supplierKeys.sync.lastAvailableModelCount}, last checked ${new Date(supplierKeys.sync.lastModelSyncSuccessAt).toLocaleString()}.`}
+          </p>
+        )}
+        {supplierSyncMessage && <p style={{ color: "#7ee787", fontSize: 13, marginBottom: 0 }}>{supplierSyncMessage}</p>}
+        {supplierKeys && (
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Supplier key</th>
+                <th>Status</th>
+                <th>Group</th>
+                <th>Allowed models</th>
+                <th>Last synced</th>
+              </tr>
+            </thead>
+            <tbody>
+              {supplierKeys.keys.map((key) => (
+                <tr key={key.id}>
+                  <td>{key.name}</td>
+                  <td><code>••••{key.keyLast4}</code></td>
+                  <td>
+                    <span className={`badge ${key.status === 1 && key.presentOnSupplier ? "active" : "revoked"}`}>
+                      {key.status === 1 && key.presentOnSupplier ? "Active" : "Inactive"}
+                    </span>
+                  </td>
+                  <td>{key.supplierGroup ?? "—"}</td>
+                  <td style={{ maxWidth: 320 }}>
+                    {key.modelLimitsEnabled ? key.allowedModels.join(", ") || "No models" : "All supplier models"}
+                  </td>
+                  <td>{new Date(key.lastSyncedAt).toLocaleString()}</td>
+                </tr>
+              ))}
+              {supplierKeys.keys.length === 0 && (
+                <tr><td colSpan={6} style={{ color: "#9aa4b2" }}>No mirrored supplier keys yet. Select Sync SubRouter keys.</td></tr>
+              )}
+            </tbody>
+          </table>
+        )}
+      </div>
 
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Models</h3>
@@ -325,6 +437,7 @@ export default function RouterPage() {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
                 <strong>{p.name}</strong> <span className="badge active">{p.standard}</span>
+                {p.source === "subrouter" && <span className="badge active" style={{ marginLeft: 6 }}>SubRouter key</span>}
                 <div style={{ color: "#9aa4b2", fontSize: 12 }}>
                   {p.baseUrl} — key ****{p.apiKeyLast4}
                 </div>
@@ -488,7 +601,7 @@ export default function RouterPage() {
             <option value="">Add provider to this model…</option>
             {availableProviders.map((p) => (
               <option key={p.id} value={p.id}>
-                {p.name}
+                {p.name}{p.source === "subrouter" ? " (matching SubRouter key)" : ""}
               </option>
             ))}
           </select>

@@ -112,4 +112,27 @@ describe("SubRouterClient", () => {
       message: "SubRouter account identity did not match",
     });
   });
+
+  it("lists supplier keys and preserves the supplier model groups", async () => {
+    const fetchImpl = vi.fn(async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/token/") {
+        return jsonResponse({
+          success: true,
+          data: { page: 1, page_size: 100, total: 1, items: [{ id: 7, name: "Supplier key" }] },
+        });
+      }
+      if (url.pathname === "/api/models") {
+        return jsonResponse({
+          success: true,
+          data: { default: ["claude-sonnet-5", "gpt-5"], metadata: { refreshed: true } },
+        });
+      }
+      return jsonResponse({ success: false, data: null }, 404);
+    }) as typeof fetch;
+
+    const client = new SubRouterClient({ baseUrl: "https://subrouter.ai", session: SESSION, userId: USER_ID, fetchImpl });
+    await expect(client.listTokens({ page: 1, pageSize: 100 })).resolves.toMatchObject({ total: 1, items: [{ id: 7 }] });
+    await expect(client.listModels()).resolves.toEqual({ groups: { default: ["claude-sonnet-5", "gpt-5"] } });
+  });
 });

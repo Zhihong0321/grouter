@@ -54,6 +54,18 @@ export interface SupplierStats {
   token: string;
 }
 
+export interface SubRouterTokenPage {
+  page: number;
+  pageSize: number;
+  total: number;
+  items: Record<string, unknown>[];
+}
+
+export interface SubRouterModelCatalog {
+  /** Maps a supplier group/channel identifier to the model IDs it advertises. */
+  groups: Record<string, string[]>;
+}
+
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -228,6 +240,45 @@ export class SubRouterClient {
       quota: integerString(result.data.quota, "data.quota"),
       token: integerString(result.data.token, "data.token"),
     };
+  }
+
+  async listTokens(params: { page: number; pageSize: number }): Promise<SubRouterTokenPage> {
+    const result = await this.get("/api/token/", {
+      p: String(params.page),
+      size: String(params.pageSize),
+    });
+    if (!isRecord(result.data) || !Array.isArray(result.data.items) || !result.data.items.every(isRecord)) {
+      throw new SubRouterError("invalid_response", "SubRouter token response was invalid");
+    }
+    return {
+      page: nonNegativeSafeNumber(result.data.page, "data.page"),
+      pageSize: nonNegativeSafeNumber(result.data.page_size, "data.page_size"),
+      total: nonNegativeSafeNumber(result.data.total, "data.total"),
+      items: result.data.items,
+    };
+  }
+
+  async listModels(): Promise<SubRouterModelCatalog> {
+    const result = await this.get("/api/models");
+    if (!isRecord(result.data)) {
+      throw new SubRouterError("invalid_response", "SubRouter model catalog response was invalid");
+    }
+
+    const groups: Record<string, string[]> = {};
+    for (const [group, value] of Object.entries(result.data)) {
+      // The endpoint currently also returns one metadata object alongside its
+      // group -> model[] map. Preserve the model arrays and ignore metadata.
+      if (!Array.isArray(value)) continue;
+      if (!value.every((model) => typeof model === "string")) {
+        throw new SubRouterError("invalid_response", `SubRouter model group ${group} was invalid`);
+      }
+      groups[group] = value;
+    }
+
+    if (Object.keys(groups).length === 0) {
+      throw new SubRouterError("invalid_response", "SubRouter returned no model groups");
+    }
+    return { groups };
   }
 
   async probeConnection(): Promise<SubRouterConnectionProbe> {

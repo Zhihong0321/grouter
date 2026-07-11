@@ -18,6 +18,8 @@
     "seed:admin": "tsx scripts/seed-admin.ts",
     "check:subrouter": "node dist/subrouterCheck.js",
     "sync:subrouter": "node dist/subrouterSync.js",
+    "sync:subrouter-keys": "node dist/subrouterKeySync.js",
+    "sync:subrouter-models": "node dist/subrouterAvailableModelsSync.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },

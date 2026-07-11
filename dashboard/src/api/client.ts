@@ -121,6 +121,9 @@ export interface ProviderDto {
   apiKeyLast4: string;
   active: boolean;
   createdAt: string;
+  source: "manual" | "subrouter";
+  /** Exact model IDs returned by GET /v1/models for this imported supplier key. */
+  supplierKeyModelIds: string[] | null;
 }
 
 export interface ModelRouteDto {
@@ -131,6 +134,65 @@ export interface ModelRouteDto {
   upstreamModelId: string;
   priority: number;
   active: boolean;
+}
+
+export interface SupplierKeyDto {
+  id: string;
+  externalTokenId: string;
+  name: string;
+  status: number;
+  keyLast4: string;
+  remainingQuotaUnits: string | null;
+  usedQuotaUnits: string | null;
+  unlimitedQuota: boolean;
+  modelLimitsEnabled: boolean;
+  allowedModels: string[];
+  supplierGroup: string | null;
+  expiresAt: string | null;
+  accessedAt: string | null;
+  presentOnSupplier: boolean;
+  lastSyncedAt: string;
+}
+
+export interface SupplierKeySyncDto {
+  supplier: "subrouter";
+  sync: {
+    supplier: "subrouter";
+    lastAttemptAt: string | null;
+    lastSuccessAt: string | null;
+    lastErrorType: string | null;
+    lastError: string | null;
+    lastKeyCount: number;
+    lastModelCount: number;
+    lastModelSyncAttemptAt: string | null;
+    lastModelSyncSuccessAt: string | null;
+    lastModelSyncErrorType: string | null;
+    lastModelSyncError: string | null;
+    lastAvailableModelCount: number;
+  } | null;
+  catalogModelCount: number;
+  keys: SupplierKeyDto[];
+}
+
+export interface SupplierKeySyncResultDto {
+  synchronized: true;
+  supplier: "subrouter";
+  keyCount: number;
+  modelCount: number;
+  restrictedKeyCount: number;
+  routingProviderCount: number;
+  syncedAt: string;
+}
+
+export interface SupplierAvailableModelSyncResultDto {
+  synchronized: true;
+  supplier: "subrouter";
+  keyCount: number;
+  availableModelCount: number;
+  addedToRoutingCatalog: number;
+  alreadyInRoutingCatalog: number;
+  conflictingModelIds: string[];
+  syncedAt: string;
 }
 
 export interface RequestLogDto {
@@ -193,6 +255,10 @@ export const api = {
   checkProviderHealth: (id: string) => request<ProviderHealthDto>(`/providers/${id}/health`, { method: "POST" }),
   testOpenaiProvider: (id: string) => request<OpenAiEndpointTestResultDto>(`/providers/${id}/test-openai`, { method: "POST" }),
   testOpenaiStreaming: (id: string) => request<OpenAiStreamingTestResultDto>(`/providers/${id}/test-openai-streaming`, { method: "POST" }),
+
+  getSupplierKeys: () => request<SupplierKeySyncDto>("/supplier-sync/keys"),
+  syncSupplierKeys: () => request<SupplierKeySyncResultDto>("/supplier-sync/keys", { method: "POST" }),
+  syncSupplierAvailableModels: () => request<SupplierAvailableModelSyncResultDto>("/supplier-sync/available-models", { method: "POST" }),
 
   getModelRoutes: (modelId: string) => request<ModelRouteDto[]>(`/models/${modelId}/routes`),
   putModelRoutes: (modelId: string, routes: { providerId: string; upstreamModelId: string; priority: number }[]) =>

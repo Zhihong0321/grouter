@@ -38,14 +38,24 @@ function rowToDto(row: any) {
     apiKeyLast4: last4(row.api_key_encrypted),
     active: row.active,
     createdAt: row.created_at,
+    source: row.supplier_key_id ? "subrouter" : "manual",
+    supplierKeyModelIds: row.supplier_key_id ? row.supplier_key_models : null,
   };
 }
+
+const providersSelect = `
+  SELECT p.*, k.id AS supplier_key_id,
+    COALESCE(json_agg(m.model_id ORDER BY m.model_id) FILTER (WHERE m.model_id IS NOT NULL), '[]'::json) AS supplier_key_models
+  FROM reseller_providers p
+  LEFT JOIN reseller_supplier_keys k ON k.provider_id = p.id
+  LEFT JOIN reseller_supplier_key_models m ON m.supplier_key_id = k.id
+  GROUP BY p.id, k.id`;
 
 const providersRoutes: FastifyPluginAsync = async (app) => {
   app.addHook("preHandler", requireAdmin);
 
   app.get("/admin/api/providers", async () => {
-    const { rows } = await app.pg.query("SELECT * FROM reseller_providers ORDER BY created_at ASC");
+    const { rows } = await app.pg.query(`${providersSelect} ORDER BY p.created_at ASC`);
     return rows.map(rowToDto);
   });
 
