@@ -41,6 +41,27 @@ export interface DetectResult {
   codexConfigExists: boolean;
 }
 
+export interface UsageEntry {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationInputTokens: number;
+  cacheReadInputTokens: number;
+  costCents: number;
+  stream: boolean;
+  createdAt: string;
+}
+
+export interface UsageResult {
+  requestCount: number;
+  costCents: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationInputTokens: number;
+  cacheReadInputTokens: number;
+  recent: UsageEntry[];
+}
+
 export interface AppError {
   kind: "Io" | "ParseFailed" | "Network" | "InvalidKey" | "NotFound";
   message: string;
@@ -59,6 +80,7 @@ export const api = {
     invoke<AccountResult>("apply_for_key", { username, recoveryPassword }),
   recoverAccount: (recoveryPassword: string) => invoke<AccountResult>("recover_account", { recoveryPassword }),
   getBalance: () => invoke<BalanceResult>("get_balance"),
+  getUsage: (range?: "7d" | "30d") => invoke<UsageResult>("get_usage", { range }),
   getStatus: () => invoke<StatusResult>("get_status"),
   verifyKey: (baseUrl: string, key: string) => invoke<VerifyResult>("verify_key", { baseUrl, key }),
   verifyStoredKey: () => invoke<VerifyResult>("verify_stored_key"),

@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, errorMessage, StatusResult, BalanceResult, VerifyResult } from "./api";
+import { api, errorMessage, StatusResult, BalanceResult, VerifyResult, UsageResult } from "./api";
 
-type Screen = "loading" | "welcome" | "recover" | "saveRecovery" | "switcher";
+type Screen = "loading" | "welcome" | "recover" | "saveRecovery" | "switcher" | "usage";
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>("loading");
@@ -28,6 +28,11 @@ export default function App() {
   const [togglingClaude, setTogglingClaude] = useState(false);
   const [togglingCodex, setTogglingCodex] = useState(false);
   const [showRestartReminder, setShowRestartReminder] = useState(false);
+
+  // Usage log screen state
+  const [usage, setUsage] = useState<UsageResult | null>(null);
+  const [usageRange, setUsageRange] = useState<"7d" | "30d">("30d");
+  const [loadingUsage, setLoadingUsage] = useState(false);
 
   useEffect(() => {
     void bootstrap();
@@ -165,6 +170,25 @@ export default function App() {
     }
   }
 
+  async function loadUsage(range: "7d" | "30d") {
+    setError(null);
+    setLoadingUsage(true);
+    try {
+      const result = await api.getUsage(range);
+      setUsage(result);
+      setUsageRange(range);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setLoadingUsage(false);
+    }
+  }
+
+  async function handleOpenUsage() {
+    setScreen("usage");
+    await loadUsage(usageRange);
+  }
+
   async function handleSaveAdvanced() {
     setError(null);
     try {
@@ -265,6 +289,72 @@ export default function App() {
     );
   }
 
+  if (screen === "usage") {
+    const totalTokens =
+      (usage?.inputTokens ?? 0) +
+      (usage?.outputTokens ?? 0) +
+      (usage?.cacheCreationInputTokens ?? 0) +
+      (usage?.cacheReadInputTokens ?? 0);
+    return (
+      <div className="app">
+        <h1>Usage</h1>
+        {error && <div className="error">{error}</div>}
+
+        <div className="usage-range">
+          <button className={usageRange === "7d" ? "" : "link"} onClick={() => loadUsage("7d")} disabled={loadingUsage}>
+            7 days
+          </button>
+          <button className={usageRange === "30d" ? "" : "link"} onClick={() => loadUsage("30d")} disabled={loadingUsage}>
+            30 days
+          </button>
+        </div>
+
+        {loadingUsage && <p className="hint">Loading...</p>}
+
+        {usage && !loadingUsage && (
+          <>
+            <div className="usage-summary">
+              <div>
+                <span className="usage-summary-value">{usage.requestCount}</span>
+                <span className="usage-summary-label">requests</span>
+              </div>
+              <div>
+                <span className="usage-summary-value">${(usage.costCents / 100).toFixed(2)}</span>
+                <span className="usage-summary-label">spent</span>
+              </div>
+              <div>
+                <span className="usage-summary-value">{totalTokens.toLocaleString()}</span>
+                <span className="usage-summary-label">tokens</span>
+              </div>
+            </div>
+
+            <div className="usage-table">
+              <div className="usage-row usage-row-header">
+                <span>When</span>
+                <span>Model</span>
+                <span>Tokens</span>
+                <span>Cost</span>
+              </div>
+              {usage.recent.length === 0 && <p className="hint">No usage yet.</p>}
+              {usage.recent.map((entry, i) => (
+                <div className="usage-row" key={i}>
+                  <span>{new Date(entry.createdAt).toLocaleString()}</span>
+                  <span>{entry.model}</span>
+                  <span>{(entry.inputTokens + entry.outputTokens + entry.cacheCreationInputTokens + entry.cacheReadInputTokens).toLocaleString()}</span>
+                  <span>${(entry.costCents / 100).toFixed(4)}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        <button className="link" onClick={() => setScreen("switcher")}>
+          Back
+        </button>
+      </div>
+    );
+  }
+
   // screen === "switcher"
   return (
     <div className="app">
@@ -277,6 +367,9 @@ export default function App() {
           {balance?.unlimited ? "Unlimited" : balance ? `$${((balance.balanceCents ?? 0) / 100).toFixed(2)} left` : "--"}
         </span>
       </div>
+      <button className="link" onClick={handleOpenUsage}>
+        View usage
+      </button>
 
       <button onClick={handleVerify} disabled={verifying}>
         {verifying ? "Verifying..." : "Verify key"}

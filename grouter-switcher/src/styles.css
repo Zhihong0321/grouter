@@ -163,3 +163,61 @@ button.link {
   display: flex;
   gap: 8px;
 }
+
+.usage-range {
+  display: flex;
+  gap: 8px;
+}
+
+.usage-summary {
+  display: flex;
+  justify-content: space-between;
+  border: 1px solid #e2e2e5;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.usage-summary > div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.usage-summary-value {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.usage-summary-label {
+  font-size: 11px;
+  color: #666;
+}
+
+.usage-table {
+  border: 1px solid #e2e2e5;
+  border-radius: 8px;
+  overflow: hidden;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.usage-row {
+  display: grid;
+  grid-template-columns: 2fr 1.4fr 1fr 1fr;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  border-bottom: 1px solid #f0f0f2;
+}
+
+.usage-row:last-child {
+  border-bottom: none;
+}
+
+.usage-row-header {
+  font-weight: 600;
+  background: #f7f7f8;
+  position: sticky;
+  top: 0;
+}

@@ -19,6 +19,7 @@ fn main() {
             commands::apply_for_key,
             commands::recover_account,
             commands::get_balance,
+            commands::get_usage,
             commands::get_status,
             commands::verify_key,
             commands::verify_stored_key,

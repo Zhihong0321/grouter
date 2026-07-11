@@ -162,6 +162,63 @@ pub async fn get_balance(state: State<'_, AppState>) -> Result<BalanceResult, Ap
     })
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct UsageEntry {
+    pub model: String,
+    #[serde(rename = "inputTokens")]
+    pub input_tokens: i64,
+    #[serde(rename = "outputTokens")]
+    pub output_tokens: i64,
+    #[serde(rename = "cacheCreationInputTokens")]
+    pub cache_creation_input_tokens: i64,
+    #[serde(rename = "cacheReadInputTokens")]
+    pub cache_read_input_tokens: i64,
+    #[serde(rename = "costCents")]
+    pub cost_cents: i64,
+    pub stream: bool,
+    #[serde(rename = "createdAt")]
+    pub created_at: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct UsageResult {
+    #[serde(rename = "requestCount")]
+    pub request_count: i64,
+    #[serde(rename = "costCents")]
+    pub cost_cents: i64,
+    #[serde(rename = "inputTokens")]
+    pub input_tokens: i64,
+    #[serde(rename = "outputTokens")]
+    pub output_tokens: i64,
+    #[serde(rename = "cacheCreationInputTokens")]
+    pub cache_creation_input_tokens: i64,
+    #[serde(rename = "cacheReadInputTokens")]
+    pub cache_read_input_tokens: i64,
+    pub recent: Vec<UsageEntry>,
+}
+
+#[tauri::command]
+pub async fn get_usage(state: State<'_, AppState>, range: Option<String>) -> Result<UsageResult, AppError> {
+    let base_url = state.0.lock().await.base_url.clone();
+    let recovery_password =
+        load_secret(KEYCHAIN_RECOVERY_USER)?.ok_or_else(|| AppError::NotFound("No local account -- apply for a key first".to_string()))?;
+
+    let client = reqwest::Client::new();
+    let mut request = client
+        .get(format!("{}/client/accounts/me/usage", base_url.trim_end_matches('/')))
+        .header("x-recovery-password", recovery_password);
+    if let Some(r) = range {
+        request = request.query(&[("range", r)]);
+    }
+
+    let resp = request.send().await.map_err(|e| AppError::Network(e.to_string()))?;
+    if !resp.status().is_success() {
+        return Err(AppError::Network(format!("Server returned {}", resp.status())));
+    }
+
+    resp.json().await.map_err(|e| AppError::Network(e.to_string()))
+}
+
 #[derive(Serialize)]
 pub struct ToolStatusResult {
     pub installed: bool,
