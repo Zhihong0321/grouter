@@ -1,628 +1,169 @@
-import { useEffect, useState, type FormEvent } from "react";
-import { api, type SettingsDto, type ModelDto, type ProviderDto, type ModelRouteDto, type ProviderHealthDto, type OpenAiEndpointTestResultDto, type OpenAiStreamingTestResultDto, type SupplierKeySyncDto } from "../api/client.js";
+import { useEffect, useMemo, useState } from "react";
+import { api, type ProviderModelTestResultDto, type SmartRouteDto, type SmartRoutingModelDto } from "../api/client.js";
+
+type ModelGroup = "anthropic" | "openai" | "china" | "other";
+
+const CHINA_MODEL = /deepseek|qwen|glm|zhipu|kimi|moonshot|minimax|doubao|baichuan|hunyuan|ernie|stepfun|yi-/i;
+const OPENAI_MODEL = /(^gpt-|^o[0-9]|openai)/i;
+
+function groupFor(model: SmartRoutingModelDto): ModelGroup {
+  if (model.brand.toLowerCase() === "anthropic" || model.modelId.startsWith("claude-")) return "anthropic";
+  if (model.brand.toLowerCase() === "openai" || OPENAI_MODEL.test(model.modelId)) return "openai";
+  return CHINA_MODEL.test(`${model.brand} ${model.modelId}`) ? "china" : "other";
+}
+
+function testSummary(result: ProviderModelTestResultDto | undefined): { text: string; ok: boolean } | undefined {
+  if (!result) return undefined;
+  const ok = result.results.every((item) => item.ok);
+  const latency = Math.max(...result.results.map((item) => item.latencyMs));
+  return { ok, text: ok ? `Alive · ${latency}ms` : result.results.find((item) => !item.ok)?.message ?? "Failed" };
+}
+
+function Pair({ route, model, result, testing, onTest, onPrimary }: {
+  route: SmartRouteDto;
+  model: SmartRoutingModelDto;
+  result?: ProviderModelTestResultDto;
+  testing: boolean;
+  onTest: () => void;
+  onPrimary: () => void;
+}) {
+  const summary = testSummary(result);
+  return (
+    <div className="route-pair">
+      <div>
+        <strong>{route.priority === 1 ? "Primary" : `Backup #${route.priority - 1}`}</strong>
+        <span> {route.providerName}{route.keyLast4 ? ` · ••••${route.keyLast4}` : ""}</span>
+        {!route.active && <span className="badge revoked" style={{ marginLeft: 6 }}>Unavailable</span>}
+      </div>
+      <div className="route-pair-actions">
+        <button type="button" className="secondary" onClick={onTest} disabled={testing || !route.active} title="Sends a tiny real request and may use a few upstream tokens">
+          {testing ? "Testing…" : "Smoke test"}
+        </button>
+        <button type="button" className="secondary" onClick={onPrimary} disabled={!route.active || route.priority === 1}>Make primary</button>
+      </div>
+      {summary && <small style={{ color: summary.ok ? "#7ee787" : "#ff8080" }}>{summary.text}</small>}
+      <small className="route-model-id">Upstream: {route.upstreamModelId}</small>
+    </div>
+  );
+}
+
+function ModelSection({ title, description, models, tests, testingPair, onTest, onPrimary }: {
+  title: string;
+  description: string;
+  models: SmartRoutingModelDto[];
+  tests: Record<string, ProviderModelTestResultDto>;
+  testingPair: string | null;
+  onTest: (model: SmartRoutingModelDto, route: SmartRouteDto) => void;
+  onPrimary: (model: SmartRoutingModelDto, route: SmartRouteDto) => void;
+}) {
+  return (
+    <section className="card">
+      <h3 style={{ marginTop: 0 }}>{title}</h3>
+      <p style={{ color: "#9aa4b2", marginTop: -6 }}>{description}</p>
+      <table className="smart-routing-table">
+        <thead><tr><th>Model</th><th>Protocol</th><th>Key pairing and failover order</th></tr></thead>
+        <tbody>
+          {models.map((model) => (
+            <tr key={model.modelId}>
+              <td>
+                <strong>{model.displayName}</strong>
+                <small className="route-model-id">{model.modelId}</small>
+                {!model.active && <span className="badge revoked">Disabled</span>}
+              </td>
+              <td><span className="badge active">{model.standard}</span></td>
+              <td>
+                {model.routes.length === 0
+                  ? <span style={{ color: "#9aa4b2" }}>No compatible active key found. Run Smart sync after adding/syncing keys.</span>
+                  : model.routes.map((route) => {
+                    const id = `${model.modelId}:${route.providerId}`;
+                    return <Pair key={route.routeId} route={route} model={model} result={tests[id]} testing={testingPair === id}
+                      onTest={() => onTest(model, route)} onPrimary={() => onPrimary(model, route)} />;
+                  })}
+              </td>
+            </tr>
+          ))}
+          {models.length === 0 && <tr><td colSpan={3} style={{ color: "#9aa4b2" }}>No models in this group yet.</td></tr>}
+        </tbody>
+      </table>
+    </section>
+  );
+}
 
 export default function RouterPage() {
-  const [settings, setSettings] = useState<SettingsDto | null>(null);
-  const [keyPrefix, setKeyPrefix] = useState("");
-  const [savedPrefix, setSavedPrefix] = useState(false);
-
-  const [models, setModels] = useState<ModelDto[]>([]);
-  const [newModelId, setNewModelId] = useState("");
-  const [newModelName, setNewModelName] = useState("");
-  const [newModelBrand, setNewModelBrand] = useState("Anthropic");
-  const [newModelStandard, setNewModelStandard] = useState<"anthropic" | "openai">("anthropic");
-
-  const [providers, setProviders] = useState<ProviderDto[]>([]);
-  const [newProviderName, setNewProviderName] = useState("");
-  const [newProviderUrl, setNewProviderUrl] = useState("");
-  const [newProviderKey, setNewProviderKey] = useState("");
-  const [newProviderStandard, setNewProviderStandard] = useState<"anthropic" | "openai">("anthropic");
-  const [editingProviderId, setEditingProviderId] = useState<string | null>(null);
-  const [editProviderName, setEditProviderName] = useState("");
-  const [editProviderUrl, setEditProviderUrl] = useState("");
-  const [editProviderKey, setEditProviderKey] = useState("");
-  const [healthResults, setHealthResults] = useState<Record<string, ProviderHealthDto>>({});
-  const [testingProvider, setTestingProvider] = useState<string | null>(null);
-  const [openaiTestResults, setOpenaiTestResults] = useState<Record<string, OpenAiEndpointTestResultDto>>({});
-  const [openaiTestErrors, setOpenaiTestErrors] = useState<Record<string, string>>({});
-  const [testingOpenaiProvider, setTestingOpenaiProvider] = useState<string | null>(null);
-  const [streamingTestResults, setStreamingTestResults] = useState<Record<string, OpenAiStreamingTestResultDto>>({});
-  const [streamingTestErrors, setStreamingTestErrors] = useState<Record<string, string>>({});
-  const [testingStreamingProvider, setTestingStreamingProvider] = useState<string | null>(null);
-
-  const [supplierKeys, setSupplierKeys] = useState<SupplierKeySyncDto | null>(null);
-  const [syncingSupplierKeys, setSyncingSupplierKeys] = useState(false);
-  const [syncingSupplierModels, setSyncingSupplierModels] = useState(false);
-  const [supplierSyncMessage, setSupplierSyncMessage] = useState<string | null>(null);
-
-  const [selectedModelId, setSelectedModelId] = useState("");
-  const [routes, setRoutes] = useState<ModelRouteDto[]>([]);
-  const [routesDirty, setRoutesDirty] = useState(false);
-  const [addRouteProviderId, setAddRouteProviderId] = useState("");
+  const [models, setModels] = useState<SmartRoutingModelDto[]>([]);
+  const [syncing, setSyncing] = useState(false);
+  const [testingPair, setTestingPair] = useState<string | null>(null);
+  const [tests, setTests] = useState<Record<string, ProviderModelTestResultDto>>({});
+  const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const loadSettings = () =>
-    api.getSettings().then((s) => {
-      setSettings(s);
-      setKeyPrefix(s.keyPrefix);
-    });
-  const loadModels = () =>
-    api.listModels().then((ms) => {
-      setModels(ms);
-      setSelectedModelId((prev) => prev || ms[0]?.modelId || "");
-    });
-  const loadProviders = () => api.listProviders().then(setProviders);
-  const loadSupplierKeys = () => api.getSupplierKeys().then(setSupplierKeys);
-  const loadRoutes = (modelId: string) => {
-    if (!modelId) return;
-    api.getModelRoutes(modelId).then((r) => {
-      setRoutes(r);
-      setRoutesDirty(false);
-    });
+  const load = async () => {
+    try {
+      setModels(await api.getSmartRouting());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load smart routing");
+    }
+  };
+  useEffect(() => { void load(); }, []);
+
+  const groups = useMemo(() => ({
+    anthropic: models.filter((model) => groupFor(model) === "anthropic"),
+    openai: models.filter((model) => groupFor(model) === "openai"),
+    china: models.filter((model) => groupFor(model) === "china"),
+    other: models.filter((model) => groupFor(model) === "other"),
+  }), [models]);
+
+  const smartSync = async () => {
+    setSyncing(true); setError(null); setMessage(null);
+    try {
+      const result = await api.syncSmartRouting();
+      setMessage(`Synced ${result.keys.keyCount} keys and ${result.models.availableModelCount} live models. ${result.routes.addedRouteCount} new routes were paired; ${result.routes.deactivatedRouteCount} unavailable routes were disabled.`);
+      setTests({});
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Smart sync failed");
+    } finally { setSyncing(false); }
   };
 
-  useEffect(() => {
-    loadSettings();
-    loadModels();
-    loadProviders();
-    loadSupplierKeys().catch((err) => setError(err instanceof Error ? err.message : "Failed to load SubRouter keys"));
-  }, []);
-
-  useEffect(() => {
-    loadRoutes(selectedModelId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedModelId]);
-
-  const saveKeyPrefix = async (e: FormEvent) => {
-    e.preventDefault();
-    setSavedPrefix(false);
-    const updated = await api.updateSettings({ keyPrefix });
-    setSettings(updated);
-    setSavedPrefix(true);
+  const smokeTest = async (model: SmartRoutingModelDto, route: SmartRouteDto) => {
+    const id = `${model.modelId}:${route.providerId}`;
+    setTestingPair(id); setError(null);
+    try {
+      const result = await api.testProviderModel(route.providerId, model.modelId);
+      setTests((current) => ({ ...current, [id]: result }));
+    } catch (err) {
+      setError(`${model.displayName} on ${route.providerName}: ${err instanceof Error ? err.message : "Smoke test failed"}`);
+    } finally { setTestingPair(null); }
   };
 
-  const addModel = async (e: FormEvent) => {
-    e.preventDefault();
+  const makePrimary = async (model: SmartRoutingModelDto, route: SmartRouteDto) => {
     setError(null);
     try {
-      await api.createModel({ modelId: newModelId, displayName: newModelName, brand: newModelBrand, standard: newModelStandard });
-      setNewModelId("");
-      setNewModelName("");
-      setNewModelBrand("Anthropic");
-      setNewModelStandard("anthropic");
-      await loadModels();
+      const ordered = [route, ...model.routes.filter((candidate) => candidate.providerId !== route.providerId)]
+        .map((candidate) => candidate.providerId);
+      await api.setModelRoutePriority(model.modelId, ordered);
+      await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to add model");
+      setError(err instanceof Error ? err.message : "Failed to update key priority");
     }
   };
-
-  const toggleModelActive = async (m: ModelDto) => {
-    await api.updateModel(m.modelId, { active: !m.active });
-    await loadModels();
-  };
-
-  const addProvider = async (e: FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    try {
-      await api.createProvider({ name: newProviderName, baseUrl: newProviderUrl, apiKey: newProviderKey, standard: newProviderStandard });
-      setNewProviderName("");
-      setNewProviderUrl("");
-      setNewProviderKey("");
-      setNewProviderStandard("anthropic");
-      await loadProviders();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to add provider");
-    }
-  };
-
-  const toggleProviderActive = async (p: ProviderDto) => {
-    setError(null);
-    try {
-      await api.updateProvider(p.id, { active: !p.active });
-      await loadProviders();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update provider");
-    }
-  };
-
-  const startEditProvider = (p: ProviderDto) => {
-    setError(null);
-    setEditingProviderId(p.id);
-    setEditProviderName(p.name);
-    setEditProviderUrl(p.baseUrl);
-    setEditProviderKey("");
-  };
-
-  const cancelEditProvider = () => {
-    setEditingProviderId(null);
-    setEditProviderName("");
-    setEditProviderUrl("");
-    setEditProviderKey("");
-  };
-
-  const saveProvider = async (e: FormEvent, id: string) => {
-    e.preventDefault();
-    setError(null);
-    try {
-      await api.updateProvider(id, {
-        name: editProviderName,
-        baseUrl: editProviderUrl,
-        ...(editProviderKey ? { apiKey: editProviderKey } : {}),
-      });
-      cancelEditProvider();
-      await loadProviders();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save provider");
-    }
-  };
-
-  const deleteProvider = async (p: ProviderDto) => {
-    if (!confirm(`Delete provider "${p.name}"? This removes it from any model's routing.`)) return;
-    setError(null);
-    try {
-      await api.deleteProvider(p.id);
-      if (editingProviderId === p.id) cancelEditProvider();
-      await loadProviders();
-      await loadRoutes(selectedModelId);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete provider");
-    }
-  };
-
-  const testProvider = async (id: string) => {
-    setTestingProvider(id);
-    try {
-      const result = await api.checkProviderHealth(id);
-      setHealthResults((prev) => ({ ...prev, [id]: result }));
-    } catch (err) {
-      setHealthResults((prev) => ({
-        ...prev,
-        [id]: { ok: false, latencyMs: 0, message: err instanceof Error ? err.message : "Test failed" },
-      }));
-    } finally {
-      setTestingProvider(null);
-    }
-  };
-
-  const testOpenaiProvider = async (id: string) => {
-    setTestingOpenaiProvider(id);
-    setOpenaiTestErrors((prev) => ({ ...prev, [id]: "" }));
-    try {
-      const result = await api.testOpenaiProvider(id);
-      setOpenaiTestResults((prev) => ({ ...prev, [id]: result }));
-    } catch (err) {
-      setOpenaiTestErrors((prev) => ({ ...prev, [id]: err instanceof Error ? err.message : "Test failed" }));
-    } finally {
-      setTestingOpenaiProvider(null);
-    }
-  };
-
-  const testStreamingProvider = async (id: string) => {
-    setTestingStreamingProvider(id);
-    setStreamingTestErrors((prev) => ({ ...prev, [id]: "" }));
-    try {
-      const result = await api.testOpenaiStreaming(id);
-      setStreamingTestResults((prev) => ({ ...prev, [id]: result }));
-    } catch (err) {
-      setStreamingTestErrors((prev) => ({ ...prev, [id]: err instanceof Error ? err.message : "Test failed" }));
-    } finally {
-      setTestingStreamingProvider(null);
-    }
-  };
-
-  const syncSupplierKeys = async () => {
-    setError(null);
-    setSupplierSyncMessage(null);
-    setSyncingSupplierKeys(true);
-    try {
-      const result = await api.syncSupplierKeys();
-      setSupplierSyncMessage(`Synced ${result.keyCount} keys and created ${result.routingProviderCount} routing providers. Next, sync their available models.`);
-      await Promise.all([loadSupplierKeys(), loadProviders()]);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to synchronize SubRouter keys");
-    } finally {
-      setSyncingSupplierKeys(false);
-    }
-  };
-
-  const syncSupplierAvailableModels = async () => {
-    setError(null);
-    setSupplierSyncMessage(null);
-    setSyncingSupplierModels(true);
-    try {
-      const result = await api.syncSupplierAvailableModels();
-      const conflicts = result.conflictingModelIds.length
-        ? ` ${result.conflictingModelIds.length} existing Anthropic-standard model(s) were left unchanged.`
-        : "";
-      setSupplierSyncMessage(`Synced ${result.availableModelCount} live models from ${result.keyCount} keys; ${result.addedToRoutingCatalog} added to routing.${conflicts}`);
-      await Promise.all([loadSupplierKeys(), loadProviders(), loadModels()]);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to synchronize available SubRouter models");
-    } finally {
-      setSyncingSupplierModels(false);
-    }
-  };
-
-  const renumber = (list: ModelRouteDto[]): ModelRouteDto[] => list.map((r, i) => ({ ...r, priority: i + 1 }));
-
-  const addRouteProvider = () => {
-    const provider = providers.find((p) => p.id === addRouteProviderId);
-    if (!provider) return;
-    setRoutes((prev) =>
-      renumber([
-        ...prev,
-        {
-          routeId: `new-${provider.id}`,
-          providerId: provider.id,
-          providerName: provider.name,
-          standard: provider.standard,
-          upstreamModelId: selectedModelId,
-          priority: prev.length + 1,
-          active: true,
-        },
-      ]),
-    );
-    setRoutesDirty(true);
-    setAddRouteProviderId("");
-  };
-
-  const removeRoute = (routeId: string) => {
-    setRoutes((prev) => renumber(prev.filter((r) => r.routeId !== routeId)));
-    setRoutesDirty(true);
-  };
-
-  const moveRoute = (index: number, dir: -1 | 1) => {
-    setRoutes((prev) => {
-      const target = index + dir;
-      if (target < 0 || target >= prev.length) return prev;
-      const next = [...prev];
-      [next[index], next[target]] = [next[target], next[index]];
-      return renumber(next);
-    });
-    setRoutesDirty(true);
-  };
-
-  const updateUpstreamModelId = (routeId: string, value: string) => {
-    setRoutes((prev) => prev.map((r) => (r.routeId === routeId ? { ...r, upstreamModelId: value } : r)));
-    setRoutesDirty(true);
-  };
-
-  const saveRoutes = async () => {
-    setError(null);
-    try {
-      const saved = await api.putModelRoutes(
-        selectedModelId,
-        routes.map((r) => ({ providerId: r.providerId, upstreamModelId: r.upstreamModelId, priority: r.priority })),
-      );
-      setRoutes(saved);
-      setRoutesDirty(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save routing");
-    }
-  };
-
-  const selectedModel = models.find((m) => m.modelId === selectedModelId);
-  const availableProviders = providers.filter((p) => {
-    if (routes.some((r) => r.providerId === p.id) || (selectedModel && p.standard !== selectedModel.standard)) return false;
-    return !p.supplierKeyModelIds || !selectedModel || p.supplierKeyModelIds.includes(selectedModel.modelId);
-  });
-
-  if (!settings) return <p>Loading…</p>;
 
   return (
     <div>
-      <h2>Router</h2>
-      <p style={{ color: "#9aa4b2" }}>
-        Models are what your users call. Providers are your upstream suppliers. Routing decides which provider serves
-        each model, in priority order — priority 1 is tried first, the rest are automatic failover backups.
-      </p>
+      <div className="smart-routing-header">
+        <div>
+          <h2>Smart Routing</h2>
+          <p>Sync keys once. The dashboard discovers every available model, pairs it to compatible keys, and appends new keys as backups without replacing your chosen primary.</p>
+        </div>
+        <button type="button" onClick={smartSync} disabled={syncing}>{syncing ? "Syncing keys, models & routes…" : "Smart sync SubRouter"}</button>
+      </div>
+      <p style={{ color: "#9aa4b2", fontSize: 13 }}>Smoke tests send a tiny real request and show the observed latency. They can use a small number of upstream tokens.</p>
       {error && <p style={{ color: "#ff8080" }}>{error}</p>}
+      {message && <p style={{ color: "#7ee787" }}>{message}</p>}
 
-      <div className="card">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <div>
-            <h3 style={{ margin: 0 }}>SubRouter key mirror</h3>
-            <p style={{ color: "#9aa4b2", marginBottom: 0, fontSize: 13 }}>
-              Read-only copy of supplier keys and their allowed models. Supplier keys are kept separate from customer keys.
-            </p>
-          </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button type="button" onClick={syncSupplierKeys} disabled={syncingSupplierKeys || syncingSupplierModels}>
-              {syncingSupplierKeys ? "Syncing…" : "Sync SubRouter keys"}
-            </button>
-            <button type="button" className="secondary" onClick={syncSupplierAvailableModels} disabled={syncingSupplierKeys || syncingSupplierModels}>
-              {syncingSupplierModels ? "Syncing models…" : "Sync available models from all keys"}
-            </button>
-          </div>
-        </div>
-        {supplierKeys?.sync && (
-          <p style={{ color: supplierKeys.sync.lastError ? "#ff8080" : "#9aa4b2", fontSize: 13, marginBottom: 0 }}>
-            {supplierKeys.sync.lastError
-              ? `Last sync failed: ${supplierKeys.sync.lastError}`
-              : supplierKeys.sync.lastSuccessAt
-                ? `Last synced: ${new Date(supplierKeys.sync.lastSuccessAt).toLocaleString()} — ${supplierKeys.sync.lastKeyCount} keys, ${supplierKeys.catalogModelCount} supplier models.`
-                : "Not synchronized yet."}
-          </p>
-        )}
-        {supplierKeys?.sync?.lastModelSyncSuccessAt && (
-          <p style={{ color: supplierKeys.sync.lastModelSyncError ? "#ff8080" : "#9aa4b2", fontSize: 13, marginBottom: 0 }}>
-            {supplierKeys.sync.lastModelSyncError
-              ? `Available-model sync failed: ${supplierKeys.sync.lastModelSyncError}`
-              : `Live available models: ${supplierKeys.sync.lastAvailableModelCount}, last checked ${new Date(supplierKeys.sync.lastModelSyncSuccessAt).toLocaleString()}.`}
-          </p>
-        )}
-        {supplierSyncMessage && <p style={{ color: "#7ee787", fontSize: 13, marginBottom: 0 }}>{supplierSyncMessage}</p>}
-        {supplierKeys && (
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Supplier key</th>
-                <th>Status</th>
-                <th>Group</th>
-                <th>Allowed models</th>
-                <th>Last synced</th>
-              </tr>
-            </thead>
-            <tbody>
-              {supplierKeys.keys.map((key) => (
-                <tr key={key.id}>
-                  <td>{key.name}</td>
-                  <td><code>••••{key.keyLast4}</code></td>
-                  <td>
-                    <span className={`badge ${key.status === 1 && key.presentOnSupplier ? "active" : "revoked"}`}>
-                      {key.status === 1 && key.presentOnSupplier ? "Active" : "Inactive"}
-                    </span>
-                  </td>
-                  <td>{key.supplierGroup ?? "—"}</td>
-                  <td style={{ maxWidth: 320 }}>
-                    {key.modelLimitsEnabled ? key.allowedModels.join(", ") || "No models" : "All supplier models"}
-                  </td>
-                  <td>{new Date(key.lastSyncedAt).toLocaleString()}</td>
-                </tr>
-              ))}
-              {supplierKeys.keys.length === 0 && (
-                <tr><td colSpan={6} style={{ color: "#9aa4b2" }}>No mirrored supplier keys yet. Select Sync SubRouter keys.</td></tr>
-              )}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      <div className="card">
-        <h3 style={{ marginTop: 0 }}>Models</h3>
-        <table>
-          <thead>
-            <tr>
-              <th>Model ID</th>
-              <th>Display name</th>
-              <th>Brand</th>
-              <th>Standard</th>
-              <th>Active</th>
-            </tr>
-          </thead>
-          <tbody>
-            {models.map((m) => (
-              <tr key={m.modelId}>
-                <td>{m.modelId}</td>
-                <td>{m.displayName}</td>
-                <td>{m.brand}</td>
-                <td>
-                  <span className="badge active">{m.standard}</span>
-                </td>
-                <td>
-                  <input type="checkbox" checked={m.active} onChange={() => toggleModelActive(m)} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <form onSubmit={addModel} className="form-row" style={{ flexDirection: "row", alignItems: "center", marginTop: 12 }}>
-          <input placeholder="model_id (e.g. claude-sonnet-5)" value={newModelId} onChange={(e) => setNewModelId(e.target.value)} required />
-          <input placeholder="Display name" value={newModelName} onChange={(e) => setNewModelName(e.target.value)} required />
-          <input placeholder="Brand (e.g. OpenAI)" value={newModelBrand} onChange={(e) => setNewModelBrand(e.target.value)} required />
-          <select value={newModelStandard} onChange={(e) => setNewModelStandard(e.target.value as "anthropic" | "openai")}>
-            <option value="anthropic">Anthropic API</option>
-            <option value="openai">OpenAI-compatible API</option>
-          </select>
-          <button type="submit">Add model</button>
-        </form>
-      </div>
-
-      <div className="card">
-        <h3 style={{ marginTop: 0 }}>Providers</h3>
-        {providers.map((p) => (
-          <div key={p.id} className="card" style={{ marginBottom: 8 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
-                <strong>{p.name}</strong> <span className="badge active">{p.standard}</span>
-                {p.source === "subrouter" && <span className="badge active" style={{ marginLeft: 6 }}>SubRouter key</span>}
-                <div style={{ color: "#9aa4b2", fontSize: 12 }}>
-                  {p.baseUrl} — key ****{p.apiKeyLast4}
-                </div>
-              </div>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <label style={{ fontSize: 12, color: "#9aa4b2" }}>
-                  <input type="checkbox" checked={p.active} onChange={() => toggleProviderActive(p)} /> Active
-                </label>
-                <button type="button" className="secondary" onClick={() => testProvider(p.id)} disabled={testingProvider === p.id}>
-                  {testingProvider === p.id ? "Testing…" : "Test"}
-                </button>
-                {p.standard === "openai" && (
-                  <button
-                    type="button"
-                    className="secondary"
-                    title="Sends a real minimal request to chat/completions and responses -- spends a small amount of upstream tokens, unlike Test"
-                    onClick={() => testOpenaiProvider(p.id)}
-                    disabled={testingOpenaiProvider === p.id}
-                  >
-                    {testingOpenaiProvider === p.id ? "Testing…" : "Test Chat + Responses"}
-                  </button>
-                )}
-                {p.standard === "openai" && (
-                  <button
-                    type="button"
-                    className="secondary"
-                    title="Sends a real request with stream:true and verifies actual SSE events arrive -- a relay can accept stream:true and silently buffer the whole answer instead, which this catches and Test Chat + Responses can't"
-                    onClick={() => testStreamingProvider(p.id)}
-                    disabled={testingStreamingProvider === p.id}
-                  >
-                    {testingStreamingProvider === p.id ? "Testing…" : "Test Streaming"}
-                  </button>
-                )}
-                <button type="button" className="secondary" onClick={() => startEditProvider(p)}>
-                  Edit
-                </button>
-                <button type="button" className="danger" onClick={() => deleteProvider(p)}>
-                  Delete
-                </button>
-              </div>
-            </div>
-            {editingProviderId === p.id && (
-              <form onSubmit={(e) => saveProvider(e, p.id)} className="form-row" style={{ flexDirection: "row", alignItems: "center", marginTop: 12, flexWrap: "wrap" }}>
-                <input value={editProviderName} onChange={(e) => setEditProviderName(e.target.value)} placeholder="Provider name" required />
-                <input value={editProviderUrl} onChange={(e) => setEditProviderUrl(e.target.value)} placeholder="Base URL" required />
-                <input
-                  type="password"
-                  value={editProviderKey}
-                  onChange={(e) => setEditProviderKey(e.target.value)}
-                  placeholder="New API key (optional)"
-                />
-                <button type="submit">Save changes</button>
-                <button type="button" className="secondary" onClick={cancelEditProvider}>
-                  Cancel
-                </button>
-              </form>
-            )}
-            {healthResults[p.id] && (
-              <p style={{ color: healthResults[p.id].ok ? "#7ee787" : "#ff8080", fontSize: 12, marginBottom: 0 }}>
-                {healthResults[p.id].ok
-                  ? `Connected — ${healthResults[p.id].modelCount ?? "?"} model(s) available (${healthResults[p.id].latencyMs}ms)`
-                  : `Failed: ${healthResults[p.id].message}${healthResults[p.id].statusCode ? ` (HTTP ${healthResults[p.id].statusCode})` : ""}`}
-              </p>
-            )}
-            {openaiTestErrors[p.id] && (
-              <p style={{ color: "#ff8080", fontSize: 12, marginBottom: 0 }}>Failed: {openaiTestErrors[p.id]}</p>
-            )}
-            {openaiTestResults[p.id] && (
-              <p style={{ fontSize: 12, marginBottom: 0 }}>
-                <span style={{ color: openaiTestResults[p.id].chat.ok ? "#7ee787" : "#ff8080" }}>
-                  chat/completions: {openaiTestResults[p.id].chat.ok ? `OK (${openaiTestResults[p.id].chat.latencyMs}ms)` : `Failed: ${openaiTestResults[p.id].chat.message}${openaiTestResults[p.id].chat.statusCode ? ` (HTTP ${openaiTestResults[p.id].chat.statusCode})` : ""}`}
-                </span>
-                {" — "}
-                <span style={{ color: openaiTestResults[p.id].responses.ok ? "#7ee787" : "#ff8080" }}>
-                  responses: {openaiTestResults[p.id].responses.ok ? `OK (${openaiTestResults[p.id].responses.latencyMs}ms)` : `Failed: ${openaiTestResults[p.id].responses.message}${openaiTestResults[p.id].responses.statusCode ? ` (HTTP ${openaiTestResults[p.id].responses.statusCode})` : ""}`}
-                </span>
-              </p>
-            )}
-            {streamingTestErrors[p.id] && (
-              <p style={{ color: "#ff8080", fontSize: 12, marginBottom: 0 }}>Failed: {streamingTestErrors[p.id]}</p>
-            )}
-            {streamingTestResults[p.id] && (
-              <p style={{ fontSize: 12, marginBottom: 0 }}>
-                <span style={{ color: streamingTestResults[p.id].chat.ok ? "#7ee787" : "#ff8080" }}>
-                  chat/completions:{" "}
-                  {streamingTestResults[p.id].chat.ok
-                    ? `${streamingTestResults[p.id].chat.chunksReceived} chunks, first at ${streamingTestResults[p.id].chat.ttfbMs}ms, done at ${streamingTestResults[p.id].chat.totalMs}ms`
-                    : `Failed: ${streamingTestResults[p.id].chat.message}${streamingTestResults[p.id].chat.statusCode ? ` (HTTP ${streamingTestResults[p.id].chat.statusCode})` : ""}`}
-                </span>
-                {" — "}
-                <span style={{ color: streamingTestResults[p.id].responses.ok ? "#7ee787" : "#ff8080" }}>
-                  responses:{" "}
-                  {streamingTestResults[p.id].responses.ok
-                    ? `${streamingTestResults[p.id].responses.chunksReceived} chunks, first at ${streamingTestResults[p.id].responses.ttfbMs}ms, done at ${streamingTestResults[p.id].responses.totalMs}ms`
-                    : `Failed: ${streamingTestResults[p.id].responses.message}${streamingTestResults[p.id].responses.statusCode ? ` (HTTP ${streamingTestResults[p.id].responses.statusCode})` : ""}`}
-                </span>
-              </p>
-            )}
-          </div>
-        ))}
-        <form onSubmit={addProvider} className="form-row" style={{ flexDirection: "row", alignItems: "center", marginTop: 12, flexWrap: "wrap" }}>
-          <input placeholder="Name (e.g. SupplierX)" value={newProviderName} onChange={(e) => setNewProviderName(e.target.value)} required />
-          <input placeholder="Base URL" value={newProviderUrl} onChange={(e) => setNewProviderUrl(e.target.value)} required />
-          <input type="password" placeholder="API key" value={newProviderKey} onChange={(e) => setNewProviderKey(e.target.value)} required />
-          <select value={newProviderStandard} onChange={(e) => setNewProviderStandard(e.target.value as "anthropic" | "openai")}>
-            <option value="anthropic">Anthropic API</option>
-            <option value="openai">OpenAI-compatible API</option>
-          </select>
-          <button type="submit">Add provider</button>
-        </form>
-      </div>
-
-      <div className="card">
-        <h3 style={{ marginTop: 0 }}>Routing</h3>
-        <div className="form-row">
-          <label>Model</label>
-          <select value={selectedModelId} onChange={(e) => setSelectedModelId(e.target.value)}>
-            {models.map((m) => (
-              <option key={m.modelId} value={m.modelId}>
-                {m.displayName} ({m.modelId})
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <table>
-          <thead>
-            <tr>
-              <th>Priority</th>
-              <th>Provider</th>
-              <th>Upstream model ID</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {routes.map((r, i) => (
-              <tr key={r.routeId}>
-                <td>{i === 0 ? "Primary" : `Backup #${i}`}</td>
-                <td>{r.providerName}</td>
-                <td>
-                  <input value={r.upstreamModelId} onChange={(e) => updateUpstreamModelId(r.routeId, e.target.value)} style={{ width: 200 }} />
-                </td>
-                <td style={{ display: "flex", gap: 4 }}>
-                  <button type="button" className="secondary" onClick={() => moveRoute(i, -1)} disabled={i === 0}>
-                    ↑
-                  </button>
-                  <button type="button" className="secondary" onClick={() => moveRoute(i, 1)} disabled={i === routes.length - 1}>
-                    ↓
-                  </button>
-                  <button type="button" className="danger" onClick={() => removeRoute(r.routeId)}>
-                    Remove
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        <div className="form-row" style={{ flexDirection: "row", alignItems: "center", marginTop: 12 }}>
-          <select value={addRouteProviderId} onChange={(e) => setAddRouteProviderId(e.target.value)}>
-            <option value="">Add provider to this model…</option>
-            {availableProviders.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}{p.source === "subrouter" ? " (matching SubRouter key)" : ""}
-              </option>
-            ))}
-          </select>
-          <button type="button" className="secondary" onClick={addRouteProvider} disabled={!addRouteProviderId}>
-            Add
-          </button>
-          <button type="button" onClick={saveRoutes} disabled={!routesDirty}>
-            Save routing
-          </button>
-        </div>
-      </div>
-
-      <form onSubmit={saveKeyPrefix} className="card">
-        <h3 style={{ marginTop: 0 }}>Issued-key prefix</h3>
-        <div className="form-row">
-          <input value={keyPrefix} onChange={(e) => setKeyPrefix(e.target.value)} required />
-          <span style={{ color: "#9aa4b2", fontSize: 12 }}>Client keys look like sk-{keyPrefix}-...</span>
-        </div>
-        {savedPrefix && <p style={{ color: "#7ee787" }}>Saved.</p>}
-        <button type="submit">Save</button>
-      </form>
+      <ModelSection title="Anthropic models" description="Priority and backup keys for Claude-family models." models={groups.anthropic} tests={tests} testingPair={testingPair} onTest={smokeTest} onPrimary={makePrimary} />
+      <ModelSection title="OpenAI models" description="Priority and backup keys for GPT and OpenAI-family models." models={groups.openai} tests={tests} testingPair={testingPair} onTest={smokeTest} onPrimary={makePrimary} />
+      <ModelSection title="Other & China models" description="DeepSeek, Qwen, GLM, Kimi, MiniMax and every remaining synced model." models={[...groups.china, ...groups.other]} tests={tests} testingPair={testingPair} onTest={smokeTest} onPrimary={makePrimary} />
     </div>
   );
 }

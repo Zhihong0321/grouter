@@ -7,6 +7,10 @@ interface RouteInput {
   priority: number;
 }
 
+interface PriorityBody {
+  providerIds: string[];
+}
+
 function rowToDto(row: any) {
   return {
     routeId: row.id,
@@ -91,6 +95,53 @@ const modelRoutesRoutes: FastifyPluginAsync = async (app) => {
 
       app.routerCache.invalidate();
 
+      const { rows } = await app.pg.query(ROUTES_QUERY, [modelId]);
+      return rows.map(rowToDto);
+    },
+  );
+
+  // Reorder an existing route set without recreating it. This is important
+  // for smart routing: a route that a sync has temporarily disabled must stay
+  // disabled when an admin promotes another key to primary.
+  app.put<{ Params: { modelId: string }; Body: PriorityBody }>(
+    "/admin/api/models/:modelId/routes/priority",
+    async (request, reply) => {
+      const { modelId } = request.params;
+      const providerIds = request.body.providerIds ?? [];
+      const client = await app.pg.connect();
+      try {
+        await client.query("BEGIN");
+        const { rows } = await client.query<{ provider_id: string }>(
+          "SELECT provider_id FROM reseller_model_routes WHERE model_id = $1 FOR UPDATE",
+          [modelId],
+        );
+        const currentIds = rows.map((row) => row.provider_id);
+        if (
+          providerIds.length !== currentIds.length ||
+          new Set(providerIds).size !== providerIds.length ||
+          providerIds.some((id) => !currentIds.includes(id))
+        ) {
+          await client.query("ROLLBACK");
+          return reply.code(400).send({ error: "Priority update must include every current route exactly once" });
+        }
+
+        // Avoid the (model_id, priority) uniqueness constraint while moving
+        // the current primary down the list.
+        await client.query("UPDATE reseller_model_routes SET priority = priority + 10000 WHERE model_id = $1", [modelId]);
+        for (const [index, providerId] of providerIds.entries()) {
+          await client.query(
+            "UPDATE reseller_model_routes SET priority = $1 WHERE model_id = $2 AND provider_id = $3",
+            [index + 1, modelId, providerId],
+          );
+        }
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+      app.routerCache.invalidate();
       const { rows } = await app.pg.query(ROUTES_QUERY, [modelId]);
       return rows.map(rowToDto);
     },

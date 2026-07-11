@@ -201,6 +201,33 @@ export interface SupplierAvailableModelSyncResultDto {
   syncedAt: string;
 }
 
+export interface SmartRouteDto {
+  routeId: string;
+  providerId: string;
+  providerName: string;
+  priority: number;
+  active: boolean;
+  upstreamModelId: string;
+  keyLast4: string | null;
+}
+
+export interface SmartRoutingModelDto {
+  modelId: string;
+  brand: string;
+  standard: "anthropic" | "openai";
+  displayName: string;
+  active: boolean;
+  routes: SmartRouteDto[];
+}
+
+export interface SmartRoutingSyncResultDto {
+  synchronized: true;
+  supplier: "subrouter";
+  keys: SupplierKeySyncResultDto;
+  models: SupplierAvailableModelSyncResultDto;
+  routes: { addedRouteCount: number; reactivatedRouteCount: number; deactivatedRouteCount: number; routedModelCount: number };
+}
+
 export interface RequestLogDto {
   id: string;
   created_at: string;
@@ -266,10 +293,14 @@ export const api = {
   getSupplierKeys: () => request<SupplierKeySyncDto>("/supplier-sync/keys"),
   syncSupplierKeys: () => request<SupplierKeySyncResultDto>("/supplier-sync/keys", { method: "POST" }),
   syncSupplierAvailableModels: () => request<SupplierAvailableModelSyncResultDto>("/supplier-sync/available-models", { method: "POST" }),
+  syncSmartRouting: () => request<SmartRoutingSyncResultDto>("/supplier-sync/smart-routing", { method: "POST" }),
+  getSmartRouting: () => request<SmartRoutingModelDto[]>("/smart-routing"),
 
   getModelRoutes: (modelId: string) => request<ModelRouteDto[]>(`/models/${modelId}/routes`),
   putModelRoutes: (modelId: string, routes: { providerId: string; upstreamModelId: string; priority: number }[]) =>
     request<ModelRouteDto[]>(`/models/${modelId}/routes`, { method: "PUT", body: JSON.stringify({ routes }) }),
+  setModelRoutePriority: (modelId: string, providerIds: string[]) =>
+    request<ModelRouteDto[]>(`/models/${modelId}/routes/priority`, { method: "PUT", body: JSON.stringify({ providerIds }) }),
 
   listRequestLogs: (filters: { limit?: number; model?: string; outcome?: string; keyId?: string } = {}) => {
     const params = new URLSearchParams();

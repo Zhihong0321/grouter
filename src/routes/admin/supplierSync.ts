@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { env } from "../../config/env.js";
 import { SubRouterClient, SubRouterError } from "../../lib/subrouterClient.js";
 import { SupplierKeySyncError, syncAllSupplierKeys, syncAvailableModelsFromSupplierKeys } from "../../lib/supplierKeySync.js";
+import { syncSmartRoutes } from "../../lib/smartRouting.js";
 import { requireAdmin } from "./auth.js";
 
 function syncStateDto(row: Record<string, unknown> | undefined) {
@@ -185,6 +186,59 @@ const supplierSyncRoutes: FastifyPluginAsync = async (app) => {
         error: known ? error.message : "SubRouter available-model synchronization failed",
       });
     }
+  });
+
+  // The dashboard's normal sync path: import keys, discover every key's live
+  // model list, then pair every compatible model/key automatically.
+  app.post("/admin/api/supplier-sync/smart-routing", { preHandler: requireAdmin }, async (_request, reply) => {
+    if (!env.SUBROUTER_SESSION || !env.SUBROUTER_USER_ID) {
+      return reply.code(503).send({ supplier: "subrouter", synchronized: false, errorType: "not_configured", error: "SubRouter credentials are not configured" });
+    }
+    const client = new SubRouterClient({
+      baseUrl: env.SUBROUTER_BASE_URL,
+      session: env.SUBROUTER_SESSION,
+      userId: env.SUBROUTER_USER_ID,
+      timeoutMs: env.SUBROUTER_SYNC_REQUEST_TIMEOUT_MS,
+    });
+    try {
+      const keys = await syncAllSupplierKeys({ pg: app.pg, client, upstreamBaseUrl: env.SUBROUTER_UPSTREAM_BASE_URL });
+      const models = await syncAvailableModelsFromSupplierKeys({ pg: app.pg, upstreamBaseUrl: env.SUBROUTER_UPSTREAM_BASE_URL });
+      const routes = await syncSmartRoutes(app.pg);
+      app.routerCache.invalidate();
+      app.priceCache.invalidate();
+      return { synchronized: true, supplier: "subrouter", keys, models, routes };
+    } catch (error) {
+      const known = error instanceof SubRouterError || error instanceof SupplierKeySyncError;
+      return reply.code(error instanceof SupplierKeySyncError && error.type === "already_running" ? 409 : 502).send({
+        supplier: "subrouter", synchronized: false, errorType: known ? error.type : "unknown",
+        error: known ? error.message : "SubRouter smart routing synchronization failed",
+      });
+    }
+  });
+
+  app.get("/admin/api/smart-routing", { preHandler: requireAdmin }, async () => {
+    const { rows } = await app.pg.query(
+      `SELECT m.model_id, m.brand, m.standard, m.display_name, m.active,
+              COALESCE(json_agg(json_build_object(
+                'routeId', r.id, 'providerId', p.id, 'providerName', p.name,
+                'priority', r.priority, 'active', r.active AND p.active,
+                'upstreamModelId', r.upstream_model_id, 'keyLast4', k.key_last4
+              ) ORDER BY r.priority) FILTER (WHERE r.id IS NOT NULL), '[]'::json) AS routes
+       FROM reseller_models m
+       LEFT JOIN reseller_model_routes r ON r.model_id = m.model_id
+       LEFT JOIN reseller_providers p ON p.id = r.provider_id
+       LEFT JOIN reseller_supplier_keys k ON k.provider_id = p.id
+       GROUP BY m.model_id
+       ORDER BY m.brand, m.model_id`,
+    );
+    return rows.map((row) => ({
+      modelId: row.model_id,
+      brand: row.brand,
+      standard: row.standard,
+      displayName: row.display_name,
+      active: row.active,
+      routes: row.routes,
+    }));
   });
 };
 

@@ -29,3 +29,12 @@ button.danger { background: #c0392b; }
 .breakdown-item { background: #1a1d24; padding: 12px; border-radius: 8px; }
 .breakdown-item .label { color: #9aa4b2; font-size: 12px; }
 .breakdown-item .value { font-size: 18px; font-weight: 600; margin-top: 4px; }
+.smart-routing-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 12px; }
+.smart-routing-header h2 { margin-bottom: 6px; }
+.smart-routing-header p { margin: 0; color: #9aa4b2; max-width: 680px; }
+.route-pair { padding: 8px 0; border-bottom: 1px solid #262a33; }
+.route-pair:last-child { border-bottom: 0; }
+.route-pair-actions { display: inline-flex; gap: 6px; margin: 6px 0; }
+.route-pair-actions button { padding: 5px 8px; font-size: 12px; }
+.route-model-id { display: block; color: #9aa4b2; font-family: monospace; font-size: 11px; margin-top: 4px; }
+@media (max-width: 700px) { .smart-routing-header { align-items: flex-start; flex-direction: column; } .smart-routing-table { min-width: 680px; } .card { overflow-x: auto; } }
