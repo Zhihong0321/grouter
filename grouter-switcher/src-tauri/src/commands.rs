@@ -289,3 +289,30 @@ pub fn open_config_dir(tool: String) -> Result<(), AppError> {
     };
     open::that(dir).map_err(|e| AppError::Io(e.to_string()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Exercises the actual Windows Credential Manager (or macOS Keychain on
+    /// that platform) round trip -- this is the one part unit tests can't fake,
+    /// since it's a real OS API call, not just file I/O.
+    #[test]
+    fn keychain_round_trip() {
+        let test_user = "test-round-trip-do-not-use";
+        let entry = keyring::Entry::new(KEYCHAIN_SERVICE, test_user).unwrap();
+        let _ = entry.delete_password(); // clean slate in case a prior run left it behind
+
+        assert_eq!(load_secret(test_user).unwrap(), None);
+
+        store_secret(test_user, "sk-round-trip-test-value").unwrap();
+        assert_eq!(load_secret(test_user).unwrap(), Some("sk-round-trip-test-value".to_string()));
+
+        // overwrite works, not just first-write
+        store_secret(test_user, "sk-second-value").unwrap();
+        assert_eq!(load_secret(test_user).unwrap(), Some("sk-second-value".to_string()));
+
+        entry.delete_password().unwrap();
+        assert_eq!(load_secret(test_user).unwrap(), None);
+    }
+}

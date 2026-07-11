@@ -109,3 +109,90 @@ pub fn is_drifted(tool_state: &ToolState, base_url: &str, key: &str) -> bool {
     let current_token = env_obj.get("ANTHROPIC_AUTH_TOKEN").and_then(|v| v.as_str());
     current_base != Some(base_url) || current_token != Some(key)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn sandbox(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("grouter-switcher-test-{name}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        unsafe {
+            std::env::set_var("CLAUDE_CONFIG_DIR", &dir);
+        }
+        dir
+    }
+
+    #[test]
+    fn apply_on_fresh_dir_creates_settings_with_env_block() {
+        let dir = sandbox("claude-fresh");
+        let state = apply("https://grouter.example", "sk-test-key", Some("claude-sonnet-5")).unwrap();
+        assert!(state.enabled);
+        assert!(!state.snapshot["ANTHROPIC_BASE_URL"].existed);
+        assert!(!state.snapshot["ANTHROPIC_AUTH_TOKEN"].existed);
+        assert!(!state.snapshot["ANTHROPIC_MODEL"].existed);
+
+        let written = fs::read_to_string(dir.join("settings.json")).unwrap();
+        let parsed: Value = serde_json::from_str(&written).unwrap();
+        assert_eq!(parsed["env"]["ANTHROPIC_BASE_URL"], "https://grouter.example");
+        assert_eq!(parsed["env"]["ANTHROPIC_AUTH_TOKEN"], "sk-test-key");
+        assert_eq!(parsed["env"]["ANTHROPIC_MODEL"], "claude-sonnet-5");
+    }
+
+    #[test]
+    fn apply_preserves_unrelated_settings_and_restore_puts_prior_values_back() {
+        let dir = sandbox("claude-preserve");
+        fs::write(
+            dir.join("settings.json"),
+            r#"{"env":{"ANTHROPIC_MODEL":"claude-opus-4-8","OTHER_VAR":"keep-me"},"someOtherSetting":true}"#,
+        )
+        .unwrap();
+
+        let state = apply("https://grouter.example", "sk-test-key", None).unwrap();
+        assert!(state.snapshot["ANTHROPIC_MODEL"].existed);
+        assert_eq!(state.snapshot["ANTHROPIC_MODEL"].value.as_deref(), Some("claude-opus-4-8"));
+        assert!(!state.snapshot["ANTHROPIC_BASE_URL"].existed);
+
+        let mid = fs::read_to_string(dir.join("settings.json")).unwrap();
+        let parsed: Value = serde_json::from_str(&mid).unwrap();
+        // model=None means we didn't set ANTHROPIC_MODEL ourselves this time, but the prior
+        // manual value should remain untouched until restore explicitly reverts it.
+        assert_eq!(parsed["env"]["OTHER_VAR"], "keep-me");
+        assert_eq!(parsed["someOtherSetting"], true);
+        assert!(dir.join("settings.json.grouter.bak").exists());
+
+        restore(&state).unwrap();
+        let restored = fs::read_to_string(dir.join("settings.json")).unwrap();
+        let parsed: Value = serde_json::from_str(&restored).unwrap();
+        assert_eq!(parsed["env"]["ANTHROPIC_MODEL"], "claude-opus-4-8");
+        assert_eq!(parsed["env"]["OTHER_VAR"], "keep-me");
+        assert!(parsed["env"].get("ANTHROPIC_BASE_URL").is_none());
+        assert!(parsed["env"].get("ANTHROPIC_AUTH_TOKEN").is_none());
+    }
+
+    #[test]
+    fn restore_removes_keys_that_did_not_exist_before() {
+        let dir = sandbox("claude-remove");
+        let state = apply("https://grouter.example", "sk-test-key", Some("m")).unwrap();
+        restore(&state).unwrap();
+
+        let restored = fs::read_to_string(dir.join("settings.json")).unwrap();
+        let parsed: Value = serde_json::from_str(&restored).unwrap();
+        assert!(parsed["env"].get("ANTHROPIC_BASE_URL").is_none());
+        assert!(parsed["env"].get("ANTHROPIC_AUTH_TOKEN").is_none());
+        assert!(parsed["env"].get("ANTHROPIC_MODEL").is_none());
+    }
+
+    #[test]
+    fn drift_detection() {
+        sandbox("claude-drift");
+        let state = apply("https://grouter.example", "sk-test-key", None).unwrap();
+        assert!(!is_drifted(&state, "https://grouter.example", "sk-test-key"));
+        assert!(is_drifted(&state, "https://grouter.example", "sk-different-key"));
+
+        let disabled = ToolState::default();
+        assert!(!is_drifted(&disabled, "https://grouter.example", "sk-test-key"));
+    }
+}
