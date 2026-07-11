@@ -1,0 +1,165 @@
+:root {
+  color-scheme: light;
+  font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #f7f7f8;
+  color: #1a1a1a;
+}
+
+.app {
+  width: 480px;
+  min-height: 620px;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.app.centered {
+  align-items: center;
+  justify-content: center;
+}
+
+h1 {
+  font-size: 18px;
+  margin: 0 0 8px;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: #444;
+}
+
+input,
+select {
+  padding: 8px 10px;
+  border: 1px solid #d6d6d9;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+button {
+  padding: 8px 14px;
+  border-radius: 6px;
+  border: 1px solid #d6d6d9;
+  background: #1a1a1a;
+  color: white;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+button.link {
+  background: none;
+  border: none;
+  color: #4c6ef5;
+  text-align: left;
+  padding: 4px 0;
+  font-size: 13px;
+}
+
+.hint {
+  font-size: 12px;
+  color: #666;
+  margin: 0;
+}
+
+.error {
+  background: #fdecec;
+  color: #b42318;
+  border: 1px solid #f3b4ac;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.recovery-password {
+  display: block;
+  background: #f0f0f2;
+  border-radius: 6px;
+  padding: 12px;
+  font-size: 14px;
+  text-align: center;
+  letter-spacing: 0.5px;
+  word-break: break-all;
+}
+
+.checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+.account-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: #444;
+}
+
+.tool-row {
+  border: 1px solid #e2e2e5;
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tool-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 600;
+}
+
+.switch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: normal;
+  color: #666;
+}
+
+.drift-banner {
+  background: #fff4e5;
+  color: #8a5a00;
+  border: 1px solid #f3d08a;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.advanced {
+  border-top: 1px solid #e2e2e5;
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.advanced-actions {
+  display: flex;
+  gap: 8px;
+}
