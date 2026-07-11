@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState } from "react";
-import { api, type RequestLogDto } from "../api/client.js";
+import { api, centsToDollars, type RequestLogDto } from "../api/client.js";
 
 const OUTCOME_LABEL: Record<RequestLogDto["outcome"], string> = {
   success: "Success",
@@ -69,6 +69,7 @@ export default function LogsPage() {
             <th>Key</th>
             <th>Endpoint</th>
             <th>Model</th>
+            <th>Smart Routing</th>
             <th>Outcome</th>
             <th>Status</th>
             <th>Provider</th>
@@ -88,6 +89,11 @@ export default function LogsPage() {
                 <td>{log.endpoint}</td>
                 <td>{log.model}</td>
                 <td>
+                  {log.smart_routing_enabled
+                    ? `${log.client ?? "?"} · ${log.requested_tier ?? "?"}${log.was_overridden ? ` → ${log.rule_id}` : " (kept)"}`
+                    : "—"}
+                </td>
+                <td>
                   <span className={`badge ${OUTCOME_CLASS[log.outcome]}`}>{OUTCOME_LABEL[log.outcome]}</span>
                 </td>
                 <td>{log.status_code ?? "—"}</td>
@@ -97,7 +103,7 @@ export default function LogsPage() {
               </tr>
               {expanded === log.id && (
                 <tr>
-                  <td colSpan={9} style={{ background: "#1a1d24" }}>
+                  <td colSpan={10} style={{ background: "#1a1d24" }}>
                     {(log.pre_dispatch_ms != null || log.upstream_ttfb_ms != null || log.latency_ms != null) && (
                       <table style={{ margin: "4px 0" }}>
                         <thead>
@@ -137,6 +143,34 @@ export default function LogsPage() {
                               </strong>
                             </td>
                             <td></td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    )}
+                    {log.smart_routing_enabled && (
+                      <table style={{ margin: "4px 0" }}>
+                        <thead>
+                          <tr>
+                            <th>Client</th>
+                            <th>Mode</th>
+                            <th>Requested tier</th>
+                            <th>Chosen model</th>
+                            <th>Rule</th>
+                            <th>Overridden</th>
+                            <th>Baseline cost</th>
+                            <th>Saved</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr>
+                            <td>{log.client ?? "—"}</td>
+                            <td>{log.routing_mode ?? "—"}</td>
+                            <td>{log.requested_tier ?? "—"}</td>
+                            <td>{log.chosen_model ?? "—"}</td>
+                            <td>{log.rule_id ?? "—"}</td>
+                            <td>{log.was_overridden ? "Yes" : "No"}</td>
+                            <td>{log.cost_baseline_cents != null ? centsToDollars(log.cost_baseline_cents) : "—"}</td>
+                            <td>{log.cost_saved_cents != null ? centsToDollars(log.cost_saved_cents) : "—"}</td>
                           </tr>
                         </tbody>
                       </table>

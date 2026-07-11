@@ -32,8 +32,28 @@ export interface ApiKeyDto {
   budgetCents: number;
   spentCents: number;
   modelRestrictions: string[] | null;
+  /** Smart Routing Mode -- per-key, per-client opt-in. Not the provider-failover "smart routing" on the Router page. */
+  smartRoutingClaudeCode: boolean;
+  smartRoutingCodex: boolean;
   createdAt: string;
   revokedAt: string | null;
+}
+
+export type Tier = "brain" | "build" | "routine";
+
+export interface TierConfigDto {
+  tiers: { brain: string; build: string; routine: string };
+  longContextTokens: number;
+  shortTurnTokens: number;
+  smallFastModelName: string;
+  mode: "smart" | "honor_tier";
+}
+
+export interface TierRoutingSavingsDto {
+  client: string | null;
+  overridden_request_count: string;
+  cost_baseline_cents: string;
+  cost_saved_cents: string;
 }
 
 export interface ModelPriceDto {
@@ -209,6 +229,7 @@ export interface SmartRouteDto {
   active: boolean;
   upstreamModelId: string;
   keyLast4: string | null;
+  smokeHistory: { ok: boolean; latencyMs: number; message: string; testedAt: string }[];
 }
 
 export interface SmartRoutingModelDto {
@@ -297,6 +318,17 @@ export interface RequestLogDto {
   pre_dispatch_ms: number | null;
   /** Time from dispatch to the winning provider's response headers arriving. */
   upstream_ttfb_ms: number | null;
+
+  /** Smart Routing Mode decision, captured as it was at request time. */
+  client: "claude_code" | "codex" | "unknown" | null;
+  smart_routing_enabled: boolean | null;
+  routing_mode: "smart" | "honor_tier" | null;
+  requested_tier: Tier | null;
+  chosen_model: string | null;
+  rule_id: string | null;
+  was_overridden: boolean | null;
+  cost_baseline_cents: string | null;
+  cost_saved_cents: string | null;
 }
 
 export const api = {
@@ -306,10 +338,12 @@ export const api = {
 
   listKeys: () => request<ApiKeyDto[]>("/keys"),
   getKey: (id: string) => request<ApiKeyDto>(`/keys/${id}`),
-  createKey: (body: { name: string; rateLimitRpm?: number; budgetCents?: number; modelRestrictions?: string[] | null }) =>
+  createKey: (body: { name: string; rateLimitRpm?: number; budgetCents?: number; modelRestrictions?: string[] | null; smartRoutingClaudeCode?: boolean; smartRoutingCodex?: boolean }) =>
     request<ApiKeyDto>("/keys", { method: "POST", body: JSON.stringify(body) }),
-  updateKey: (id: string, body: Partial<{ name: string; rateLimitRpm: number; budgetCents: number; modelRestrictions: string[] | null }>) =>
-    request<ApiKeyDto>(`/keys/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  updateKey: (
+    id: string,
+    body: Partial<{ name: string; rateLimitRpm: number; budgetCents: number; modelRestrictions: string[] | null; smartRoutingClaudeCode: boolean; smartRoutingCodex: boolean }>,
+  ) => request<ApiKeyDto>(`/keys/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   revokeKey: (id: string) => request<ApiKeyDto>(`/keys/${id}/revoke`, { method: "POST" }),
   removeKey: (id: string) => request<void>(`/keys/${id}`, { method: "DELETE" }),
 
@@ -345,6 +379,7 @@ export const api = {
   syncSupplierAvailableModels: () => request<SupplierAvailableModelSyncResultDto>("/supplier-sync/available-models", { method: "POST" }),
   syncSmartRouting: () => request<SmartRoutingSyncResultDto>("/supplier-sync/smart-routing", { method: "POST" }),
   getSmartRouting: () => request<SmartRoutingModelDto[]>("/smart-routing"),
+  smokeTestAllSmartRoutes: () => request<{ tested: number; passed: number; failed: number }>("/smart-routing/smoke-test-all", { method: "POST" }),
   getSupplierActivity: () => request<SupplierActivityDashboardDto>("/supplier-sync/activity"),
   syncSupplierActivity: () => request<SupplierActivitySyncResultDto>("/supplier-sync/activity", { method: "POST" }),
 
@@ -353,6 +388,11 @@ export const api = {
     request<ModelRouteDto[]>(`/models/${modelId}/routes`, { method: "PUT", body: JSON.stringify({ routes }) }),
   setModelRoutePriority: (modelId: string, providerIds: string[]) =>
     request<ModelRouteDto[]>(`/models/${modelId}/routes/priority`, { method: "PUT", body: JSON.stringify({ providerIds }) }),
+
+  getTierRoutingConfig: () => request<TierConfigDto>("/tier-routing/config"),
+  updateTierRoutingConfig: (body: Partial<{ brainModel: string; buildModel: string; routineModel: string; longContextTokens: number; shortTurnTokens: number; smallFastModelName: string; mode: "smart" | "honor_tier" }>) =>
+    request<TierConfigDto>("/tier-routing/config", { method: "PATCH", body: JSON.stringify(body) }),
+  getTierRoutingSavings: () => request<TierRoutingSavingsDto[]>("/tier-routing/savings"),
 
   listRequestLogs: (filters: { limit?: number; model?: string; outcome?: string; keyId?: string } = {}) => {
     const params = new URLSearchParams();

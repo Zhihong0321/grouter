@@ -8,6 +8,10 @@ import { callWithFailover, AllProvidersFailedError } from "../../lib/failover.js
 import { logUsage } from "../../lib/usageLogger.js";
 import { logRequestEvent } from "../../lib/requestLog.js";
 import { sendAnthropicError } from "../../lib/errors.js";
+import { detectClient, signalsFromAnthropic } from "../../lib/tierSignals.js";
+import { decideTier, fallbackDecision, type RoutingDecision, type TierConfig } from "../../lib/tierRouting.js";
+import { computeCostCents } from "../../lib/pricing.js";
+import type { CapturedUsage } from "../../types/anthropic.js";
 
 const proxyRoutes: FastifyPluginAsync = async (app) => {
   app.post("/v1/messages", async (request, reply) => {
@@ -24,25 +28,53 @@ const proxyRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const body = request.body as Record<string, unknown>;
-    const model = typeof body?.model === "string" ? body.model : undefined;
-    if (!model) {
+    const requestedModel = typeof body?.model === "string" ? body.model : undefined;
+    if (!requestedModel) {
       return sendAnthropicError(reply, "invalid_request_error", "Missing `model` field");
     }
 
-    if (keyRecord.modelRestrictions && !keyRecord.modelRestrictions.includes(model)) {
-      return sendAnthropicError(reply, "permission_error", `Key is not permitted to use model "${model}"`);
+    if (keyRecord.modelRestrictions && !keyRecord.modelRestrictions.includes(requestedModel)) {
+      return sendAnthropicError(reply, "permission_error", `Key is not permitted to use model "${requestedModel}"`);
     }
 
-    const catalogModel = await app.routerCache.getModel(model);
-    if (!catalogModel) {
-      return sendAnthropicError(reply, "invalid_request_error", `Model "${model}" is not available`);
+    const requestedCatalogModel = await app.routerCache.getModel(requestedModel);
+    if (!requestedCatalogModel) {
+      return sendAnthropicError(reply, "invalid_request_error", `Model "${requestedModel}" is not available`);
     }
-    if (catalogModel.standard !== "anthropic") {
+    if (requestedCatalogModel.standard !== "anthropic") {
       return sendAnthropicError(
         reply,
         "invalid_request_error",
-        `Model "${model}" uses the OpenAI-compatible API -- call POST /v1/chat/completions instead`,
+        `Model "${requestedModel}" uses the OpenAI-compatible API -- call POST /v1/chat/completions instead`,
       );
+    }
+
+    // Smart Routing Mode: swap in a cheaper tier when the request clears the
+    // quality bar for it. Not to be confused with src/lib/smartRouting.ts
+    // (provider failover matrix sync) -- see smart_routing_buildplan.md.
+    const client = detectClient(request.headers, "messages");
+    const smartRoutingEnabled = client === "claude_code" && keyRecord.smartRouting.claudeCode;
+    let model = requestedModel;
+    let decision: RoutingDecision | undefined;
+    let tierConfig: TierConfig | undefined;
+    if (smartRoutingEnabled) {
+      tierConfig = await app.settingsCache.getTierConfig();
+      const smallFastModelName = await app.settingsCache.getSmallFastModelName();
+      const sig = signalsFromAnthropic(body, { tiers: tierConfig.tiers, smallFastModelName });
+      decision = decideTier(sig, tierConfig);
+      if (decision.chosenModel !== requestedModel) {
+        if (keyRecord.modelRestrictions && !keyRecord.modelRestrictions.includes(decision.chosenModel)) {
+          decision = fallbackDecision(decision, requestedModel, "restricted_fallback");
+        } else {
+          const chosenCatalogModel = await app.routerCache.getModel(decision.chosenModel);
+          const chosenRoutes = chosenCatalogModel ? await app.routerCache.getRoutes(decision.chosenModel) : [];
+          if (chosenCatalogModel && chosenCatalogModel.standard === "anthropic" && chosenRoutes.length > 0) {
+            model = decision.chosenModel;
+          } else {
+            decision = fallbackDecision(decision, requestedModel, "passthrough_fallback");
+          }
+        }
+      }
     }
 
     const price = await app.priceCache.get(model);
@@ -60,6 +92,16 @@ const proxyRoutes: FastifyPluginAsync = async (app) => {
       return sendAnthropicError(reply, "billing_error", "Budget exhausted for this API key");
     }
 
+    const routingLogFields = {
+      client,
+      smartRoutingEnabled,
+      routingMode: tierConfig?.mode,
+      requestedTier: decision?.requestedTier,
+      chosenModel: model,
+      ruleId: decision?.ruleId,
+      wasOverridden: decision?.wasOverridden,
+    };
+
     const routes = await app.routerCache.getRoutes(model);
     if (routes.length === 0) {
       void logRequestEvent(app.pg, {
@@ -69,6 +111,7 @@ const proxyRoutes: FastifyPluginAsync = async (app) => {
         outcome: "no_route",
         errorMessage: "No upstream provider is configured for this model",
         preDispatchMs: Date.now() - requestStartMs,
+        ...routingLogFields,
       }).catch((err) => request.log.error(err, "logRequestEvent failed"));
       return sendAnthropicError(reply, "billing_error", `No upstream provider is configured for "${model}" yet -- set it up in /admin`);
     }
@@ -94,6 +137,7 @@ const proxyRoutes: FastifyPluginAsync = async (app) => {
           outcome: "all_providers_failed",
           attempts: err.attempts,
           preDispatchMs: dispatchStartMs - requestStartMs,
+          ...routingLogFields,
         }).catch((logErr) => request.log.error(logErr, "logRequestEvent failed"));
         return sendAnthropicError(reply, "overloaded_error", "All upstream providers are currently unavailable for this model");
       }
@@ -103,7 +147,19 @@ const proxyRoutes: FastifyPluginAsync = async (app) => {
     const { response, latencyStartMs, headersReceivedMs, providerId, providerName, upstreamModelId, attempts } = failover;
     const isStreaming = body?.stream === true;
 
-    const logDispatch = (statusCode: number, latencyMs: number) =>
+    // Only meaningful when the engine actually swapped models: what the
+    // client's originally requested tier would have cost for the same usage,
+    // vs what was actually billed.
+    const computeSavings = async (usage: CapturedUsage): Promise<{ costBaselineCents?: number; costSavedCents?: number }> => {
+      if (!decision?.wasOverridden || !tierConfig) return {};
+      const baselinePrice = await app.priceCache.get(tierConfig.tiers[decision.requestedTier]);
+      if (!baselinePrice) return {};
+      const costBaselineCents = computeCostCents(usage, baselinePrice).totalCostCents;
+      const costSavedCents = Math.max(0, costBaselineCents - computeCostCents(usage, price).totalCostCents);
+      return { costBaselineCents, costSavedCents };
+    };
+
+    const logDispatch = (statusCode: number, latencyMs: number, savings: { costBaselineCents?: number; costSavedCents?: number } = {}) =>
       void logRequestEvent(app.pg, {
         keyId: keyRecord.id,
         endpoint: "messages",
@@ -117,6 +173,8 @@ const proxyRoutes: FastifyPluginAsync = async (app) => {
         preDispatchMs: dispatchStartMs - requestStartMs,
         upstreamTtfbMs: headersReceivedMs - latencyStartMs,
         attempts: attempts.length > 0 ? attempts : undefined,
+        ...routingLogFields,
+        ...savings,
       }).catch((err) => request.log.error(err, "logRequestEvent failed"));
 
     if (isStreaming) {
@@ -125,7 +183,8 @@ const proxyRoutes: FastifyPluginAsync = async (app) => {
       forwardResponseHeaders(response, reply.raw);
       const usage = await pipeAndTapUsage(response, reply.raw);
       const latencyMs = Date.now() - latencyStartMs;
-      logDispatch(response.status, latencyMs);
+      const savings = response.ok ? await computeSavings(usage) : {};
+      logDispatch(response.status, latencyMs, savings);
       if (response.ok) {
         void logUsage(app.pg, app.redis, app.priceCache, {
           keyId: keyRecord.id,
@@ -144,7 +203,8 @@ const proxyRoutes: FastifyPluginAsync = async (app) => {
     const { json, usage } = await readJsonAndExtractUsage(response);
     reply.code(response.status).send(json);
     const latencyMs = Date.now() - latencyStartMs;
-    logDispatch(response.status, latencyMs);
+    const savings = response.ok ? await computeSavings(usage) : {};
+    logDispatch(response.status, latencyMs, savings);
     if (response.ok) {
       void logUsage(app.pg, app.redis, app.priceCache, {
         keyId: keyRecord.id,

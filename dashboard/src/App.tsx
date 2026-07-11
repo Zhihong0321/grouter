@@ -9,6 +9,7 @@ import RouterPage from "./pages/RouterPage.js";
 import LogsPage from "./pages/LogsPage.js";
 import KeyTesterPage from "./pages/KeyTesterPage.js";
 import SupplierActivityPage from "./pages/SupplierActivityPage.js";
+import TierRoutingPage from "./pages/TierRoutingPage.js";
 
 export default function App() {
   const [authed, setAuthed] = useState<boolean | null>(null);
@@ -49,6 +50,7 @@ export default function App() {
         <Link to="/tester">Key Tester</Link>
         <Link to="/supplier">SubRouter</Link>
         <Link to="/logs">Logs</Link>
+        <Link to="/smart-routing-mode">Smart Routing Mode</Link>
         <span style={{ marginLeft: "auto" }}>
           <button className="secondary" onClick={logout}>Log out</button>
         </span>
@@ -63,6 +65,7 @@ export default function App() {
           <Route path="/tester" element={<KeyTesterPage />} />
           <Route path="/supplier" element={<SupplierActivityPage />} />
           <Route path="/logs" element={<LogsPage />} />
+          <Route path="/smart-routing-mode" element={<TierRoutingPage />} />
         </Routes>
       </div>
     </>

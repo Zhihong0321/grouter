@@ -9,4 +9,9 @@ export interface ApiKeyRecord {
   spentCents: number;
   modelRestrictions: string[] | null;
   unlimited: boolean;
+  /** Smart Routing Mode -- per-key, per-client opt-in. See src/lib/tierRouting.ts. */
+  smartRouting: {
+    claudeCode: boolean;
+    codex: boolean;
+  };
 }

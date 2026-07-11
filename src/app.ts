@@ -29,6 +29,7 @@ import modelsRoutes from "./routes/admin/models.js";
 import providersRoutes from "./routes/admin/providers.js";
 import modelRoutesRoutes from "./routes/admin/modelRoutes.js";
 import logsRoutes from "./routes/admin/logs.js";
+import tierRoutingRoutes from "./routes/admin/tierRouting.js";
 import supplierSyncRoutes from "./routes/admin/supplierSync.js";
 import clientAccountsRoutes from "./routes/client/accounts.js";
 
@@ -85,6 +86,7 @@ export async function buildApp() {
   await app.register(providersRoutes);
   await app.register(modelRoutesRoutes);
   await app.register(logsRoutes);
+  await app.register(tierRoutingRoutes);
   await app.register(supplierSyncRoutes);
   await app.register(clientAccountsRoutes);
 

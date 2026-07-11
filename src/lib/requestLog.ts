@@ -1,4 +1,6 @@
 import type { Pool } from "pg";
+import type { ClientKind, Tier } from "./tierSignals.js";
+import type { RuleId } from "./tierRouting.js";
 
 export type RequestLogOutcome = "success" | "upstream_error" | "all_providers_failed" | "no_route";
 
@@ -19,6 +21,17 @@ export interface RequestLogParams {
   preDispatchMs?: number;
   /** Time from dispatching the winning attempt to that provider's response headers arriving. */
   upstreamTtfbMs?: number;
+
+  /** Smart Routing Mode decision, captured as it was at request time -- see smart_routing_buildplan.md. */
+  client?: ClientKind;
+  smartRoutingEnabled?: boolean;
+  routingMode?: "smart" | "honor_tier";
+  requestedTier?: Tier;
+  chosenModel?: string;
+  ruleId?: RuleId;
+  wasOverridden?: boolean;
+  costBaselineCents?: number;
+  costSavedCents?: number;
 }
 
 /**
@@ -35,8 +48,9 @@ export async function logRequestEvent(pg: Pool, params: RequestLogParams): Promi
   await pg.query(
     `INSERT INTO reseller_request_logs (
       key_id, endpoint, model, outcome, status_code, provider_id, provider_name, upstream_model_id, error_message, attempts, latency_ms,
-      pre_dispatch_ms, upstream_ttfb_ms
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+      pre_dispatch_ms, upstream_ttfb_ms,
+      client, smart_routing_enabled, routing_mode, requested_tier, chosen_model, rule_id, was_overridden, cost_baseline_cents, cost_saved_cents
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
     [
       params.keyId ?? null,
       params.endpoint,
@@ -51,6 +65,15 @@ export async function logRequestEvent(pg: Pool, params: RequestLogParams): Promi
       params.latencyMs ?? null,
       params.preDispatchMs ?? null,
       params.upstreamTtfbMs ?? null,
+      params.client ?? null,
+      params.smartRoutingEnabled ?? null,
+      params.routingMode ?? null,
+      params.requestedTier ?? null,
+      params.chosenModel ?? null,
+      params.ruleId ?? null,
+      params.wasOverridden ?? null,
+      params.costBaselineCents ?? null,
+      params.costSavedCents ?? null,
     ],
   );
 }

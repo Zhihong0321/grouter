@@ -1,0 +1,10 @@
+ALTER TABLE reseller_request_logs
+  DROP COLUMN client,
+  DROP COLUMN smart_routing_enabled,
+  DROP COLUMN routing_mode,
+  DROP COLUMN requested_tier,
+  DROP COLUMN chosen_model,
+  DROP COLUMN rule_id,
+  DROP COLUMN was_overridden,
+  DROP COLUMN cost_baseline_cents,
+  DROP COLUMN cost_saved_cents;
