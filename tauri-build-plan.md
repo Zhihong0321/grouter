@@ -13,6 +13,19 @@ through the grouter proxy instead of the official Anthropic / OpenAI endpoints:
 
 Turning the switch **OFF** restores each tool's previous configuration.
 
+### The streamlined user journey (the whole point)
+
+```
+1. Download & open the app
+2. "Apply for a KEY to start"  → account created + key issued in-app (no dashboard, no copy-paste)
+3. Flip the switch             → Claude Code / Codex now route through grouter
+```
+
+Architecture decision (locked): **grouter stays in the request path.** Latency
+is acceptable and 75%-below-official pricing keeps it competitive, so we keep
+live budget/rate enforcement and a hidden supplier — no direct-to-supplier
+connect. (The earlier direct-connect analysis is dropped.)
+
 ---
 
 ## 1. Decisions (locked)
@@ -23,6 +36,9 @@ Turning the switch **OFF** restores each tool's previous configuration.
 | Switch behavior | **Toggle ON/OFF.** ON applies proxy config; OFF restores the prior config that was captured at ON time. |
 | Apply method | **Edit config files** (`~/.claude/settings.json`, `~/.codex/config.toml`) with backup + restore. Persists across terminal sessions and reboots; no shell needed. |
 | Platforms | **Windows + macOS.** (`%USERPROFILE%` vs `$HOME`; honor `CODEX_HOME` / a `CLAUDE_CONFIG_DIR` override.) |
+| Key issuance | **In-app self-serve** (new public grouter endpoint). **MVP:** one tap mints an **unlimited-budget trial key** — no email, no payment, no gate (you are the only user). |
+| Identity / recovery | **No signup, no KYC.** User picks a **username** + gets a **recovery password** that *is* the account ID. Enter it on any machine to restore the key. |
+| Payment | **Not in MVP.** Later: app deep-links to a hosted web checkout, then re-syncs balance. Endpoints are shaped so this drops in without a redesign. |
 
 > Note: the base URL is bundled, but keep it **editable**. If you ever run a
 > second proxy or a staging server you don't want to ship a new binary.
@@ -52,6 +68,98 @@ validation and two model pickers.
 **Codex wire API:** Codex dropped Chat Completions; custom providers must use
 `wire_api = "responses"` → `POST /v1/responses`, which the proxy implements
 (`src/routes/proxy/openai.ts:157`). Do **not** use `wire_api = "chat"`.
+
+---
+
+## 2A. Onboarding & self-serve key issuance (NEW grouter backend)
+
+Today keys are **admin-only**: `POST /admin/api/keys` sits behind
+`requireAdmin` (`src/routes/admin/keys.ts:39`). "Apply for a KEY to start" needs
+a **new public route group** on grouter that the Tauri app calls directly —
+`/client/*` (separate from `/admin/*`, no admin session).
+
+### Account & recovery model
+
+No email, no KYC. A user is `{ username, recovery_password }`, where the
+**recovery password is the account credential** — the one secret that both
+identifies and restores the account on a new machine.
+
+> **Assumption to confirm:** the recovery password is **server-generated** (a
+> strong, unique code shown once for the user to save), while the **username is
+> user-chosen** (display only). Server-generation avoids collisions and weak
+> secrets — important since this single value *is* the account. If instead you
+> want the user to *type* their own recovery password, say so; it changes only
+> validation (uniqueness + strength checks).
+
+New table (small migration):
+
+```
+client_accounts
+  id             uuid pk
+  username       text            -- display name, user-chosen, not unique-critical
+  recovery_hash  text            -- sha256/bcrypt of the recovery password
+  created_at     timestamptz
+-- reseller_api_keys gets: account_id uuid null references client_accounts(id)
+```
+
+One account → one key in MVP (schema allows many later).
+
+### New public endpoints (`/client/*`)
+
+| Endpoint | Body / auth | Does |
+| --- | --- | --- |
+| `POST /client/accounts` | `{ username }` | Creates account, generates recovery password, issues an **unlimited** key, returns `{ username, recoveryPassword, key }`. **Recovery password returned once.** |
+| `POST /client/accounts/recover` | `{ recoveryPassword }` | Looks up by `recovery_hash`, returns `{ username, key, balanceCents }`. |
+| `GET /client/accounts/me` | auth: recovery password (or the key itself) | Returns `{ username, balanceCents, spentCents, unlimited }` for the app's status/usage display. |
+
+Reuse existing issuance internals (`issueKey`, `encryptKey`,
+`reseller_api_keys`) — the `/client` route is just an unauthenticated wrapper
+that also creates the account row and links `account_id`.
+
+### "Unlimited" budget
+
+The budget check blocks when `budget_cents - spent_cents <= 0`
+(`src/lib/budget.ts`, `src/routes/proxy/messages.ts:59`). There is **no
+unlimited concept today.** Add one of:
+
+- **Recommended:** an `unlimited boolean` column on `reseller_api_keys`; skip
+  the `<= 0` check when true (touch `getRemainingBudgetCents` / the guard).
+- **Quick hack:** set `budget_cents` to a huge sentinel (e.g. $1,000,000). No
+  schema change, but "spent vs budget" displays get weird.
+
+Usage is still **logged** either way, so you see real spend during MVP.
+
+### Abuse gate (even in MVP)
+
+The endpoint is public on Railway, so guard account creation so it can't be
+spammed by a bot that finds the URL — cheap options: a **bootstrap secret**
+baked into the app build and required by `POST /client/accounts`, plus a
+per-IP rate limit (you already have `rateLimit.ts`). When you add real
+signup/payment later, this gate is replaced, not rearchitected.
+
+### App-side onboarding flow
+
+```
+First run, no local key:
+  ┌─────────────────────────────┐
+  │  Welcome to grouter          │
+  │  Username [__________]       │
+  │  [ Apply for a KEY ]         │  → POST /client/accounts
+  │  Already have one? [Recover] │  → POST /client/accounts/recover
+  └─────────────────────────────┘
+        │ success
+        ▼
+  ┌─────────────────────────────┐
+  │  Save your recovery password │
+  │   xxxx-xxxx-xxxx-xxxx  [Copy] │  ← shown ONCE
+  │  ☐ I saved it   [Continue]   │
+  └─────────────────────────────┘
+        ▼  (key + recovery pw stored locally per §7)
+     main switcher screen (§6)
+```
+
+The app stores the issued key and recovery password locally (§7) so the user
+never sees or pastes the raw key again — that's the "streamlined" win.
 
 ---
 
@@ -214,6 +322,10 @@ comment-preserving TOML edits — important, don't use plain `toml`), `reqwest`
 
 | Command | Does |
 | --- | --- |
+| `apply_for_key(username)` | `POST /client/accounts` (with bootstrap secret). Stores key + recovery password locally. Returns `{ username, recoveryPassword }` so the UI can show it once. |
+| `recover_account(recovery_password)` | `POST /client/accounts/recover`. Restores key + balance on a fresh install. |
+| `get_balance()` | `GET /client/accounts/me`. For the status/usage display. |
+| `has_local_key()` | Whether onboarding is done (decides welcome screen vs. switcher screen). |
 | `get_status()` | Returns per-tool `{ installed, enabled, drifted }` + current base URL + selected models. Runs reconcile. |
 | `verify_key(base_url, key)` | `GET {base}/v1/models` with `x-api-key` → `{ valid, anthropicModels }`; and with `Bearer` → `{ openAiModels }`. Distinguish 401 (bad key) from network error. |
 | `set_config(base_url, key, anthropicModel?, openAiModel?)` | Persists to state (validates first). |
@@ -270,6 +382,10 @@ Behavior:
   crate (Windows Credential Manager / macOS Keychain) and keep only a reference
   in `state.json`. Fall back to an app-config file if the keychain is
   unavailable. **Never** log the key; mask it in the UI (show last 4).
+- **Recovery password** is stored locally too (keychain preferred) so the user
+  never re-enters it — but it is *also* the account-restore secret, so still
+  show it once at issuance for the user to back up off-device. Treat it like the
+  key: mask in UI, never log.
 - `state.json` and `*.grouter.bak` live in the app-config dir with user-only
   perms. Don't write anything to a repo or a synced/temp dir.
 - Do not send the key anywhere except the configured grouter base URL. The base
@@ -297,26 +413,35 @@ Behavior:
 
 ## 9. Milestones
 
-1. **Scaffold** — `create-tauri-app` (React+TS), single window, `get_status`
-   stub, Windows + macOS build in CI.
-2. **Verify flow** — `verify_key` + model pickers against `GET /v1/models`.
-3. **Claude Code toggle** — `settings.json` merge/restore + snapshot + backup;
+1. **grouter backend (`/client/*`)** — `client_accounts` table + `account_id`
+   on keys; `unlimited` flag; `POST /client/accounts`, `/recover`, `GET /me`;
+   bootstrap-secret gate + IP rate limit. *(This unblocks the app; do it first.)*
+2. **Scaffold** — `create-tauri-app` (React+TS), single window, welcome vs.
+   switcher routing via `has_local_key`, Windows + macOS build in CI.
+3. **Onboarding flow** — `apply_for_key` / `recover_account`, show-recovery-once
+   screen, local storage of key + recovery password.
+4. **Verify flow** — `verify_key` + model pickers against `GET /v1/models`.
+5. **Claude Code toggle** — `settings.json` merge/restore + snapshot + backup;
    reconcile.
-4. **Codex toggle** — `config.toml` via `toml_edit`; `wire_api="responses"`,
+6. **Codex toggle** — `config.toml` via `toml_edit`; `wire_api="responses"`,
    `experimental_bearer_token`; snapshot/restore.
-5. **State + drift** — `state.json`, reconcile on start/focus, drift banner.
-6. **Polish** — keychain storage, masked key, "open config dir", restart
+7. **State + drift** — `state.json`, reconcile on start/focus, drift banner.
+8. **Balance display** — `get_balance` on the switcher screen.
+9. **Polish** — keychain storage, masked key, "open config dir", restart
    reminders, icons, signing/notarization for macOS, MSI/NSIS for Windows.
-7. **Manual test matrix** — fresh machine (no config files), existing config,
-   drift, revoked key, both tools on/off independently, on both OSes.
+10. **Manual test matrix** — fresh machine (no config files), existing config,
+    drift, recover-on-new-machine, both tools on/off independently, both OSes.
 
 ---
 
-## 10. Open items for later (not blocking build)
+## 10. Post-MVP (not blocking build)
 
+- **Payment / top-up** — app deep-links to a hosted web checkout, then re-syncs
+  balance via `GET /client/accounts/me`. Slots onto the same `/client/*` group.
+- **Real issuance gate** — replace the MVP bootstrap secret + unlimited key with
+  email/trial or pay-first, and per-account budgets. No app redesign needed.
 - Optional auto-detect of whether Claude Code / Codex is actually installed to
   hide irrelevant toggles.
-- Optional "usage" panel if grouter later exposes a per-key usage endpoint.
 - Auto-update (Tauri updater) so you can ship base-URL or provider-format
   changes without users reinstalling.
 
