@@ -22,6 +22,10 @@ const schema = z.object({
   SUBROUTER_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
   SUBROUTER_SYNC_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(60000),
   SUBROUTER_QUOTA_PER_USD: z.coerce.number().int().positive().default(500000),
+  // Gates POST /client/accounts (public, unauthenticated self-serve signup for
+  // the Tauri client app) so it can't be spammed by a bot that finds the URL.
+  // Baked into the app build, not tied to any one user's session.
+  CLIENT_BOOTSTRAP_SECRET: z.string().min(16),
 });
 
 export const env = schema.parse(process.env);

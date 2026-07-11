@@ -56,7 +56,7 @@ async function handleOpenAiRequest(app: Parameters<FastifyPluginAsync>[0], reque
   }
 
   const remainingBudget = await getRemainingBudgetCents(app.pg, app.redis, keyRecord.id);
-  if (remainingBudget <= 0) {
+  if (!keyRecord.unlimited && remainingBudget <= 0) {
     return sendOpenAiError(reply, "billing_error", "Budget exhausted for this API key", "insufficient_quota");
   }
 

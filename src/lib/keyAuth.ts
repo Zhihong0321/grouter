@@ -40,6 +40,7 @@ function rowToRecord(row: any): ApiKeyRecord {
     budgetCents: Number(row.budget_cents),
     spentCents: Number(row.spent_cents),
     modelRestrictions: row.model_restrictions,
+    unlimited: row.unlimited,
   };
 }
 

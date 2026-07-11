@@ -8,4 +8,5 @@ export interface ApiKeyRecord {
   budgetCents: number;
   spentCents: number;
   modelRestrictions: string[] | null;
+  unlimited: boolean;
 }
