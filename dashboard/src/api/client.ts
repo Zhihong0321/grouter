@@ -103,6 +103,12 @@ export interface OpenAiStreamingTestResultDto {
   responses: StreamingTestResultDto;
 }
 
+export interface ProviderModelTestResultDto {
+  standard: "anthropic" | "openai";
+  modelId: string;
+  results: Array<EndpointTestResultDto & { endpoint: "messages" | "chat/completions" | "responses" }>;
+}
+
 export interface ModelDto {
   modelId: string;
   brand: string;
@@ -255,6 +261,7 @@ export const api = {
   checkProviderHealth: (id: string) => request<ProviderHealthDto>(`/providers/${id}/health`, { method: "POST" }),
   testOpenaiProvider: (id: string) => request<OpenAiEndpointTestResultDto>(`/providers/${id}/test-openai`, { method: "POST" }),
   testOpenaiStreaming: (id: string) => request<OpenAiStreamingTestResultDto>(`/providers/${id}/test-openai-streaming`, { method: "POST" }),
+  testProviderModel: (id: string, modelId: string) => request<ProviderModelTestResultDto>(`/providers/${id}/test-model`, { method: "POST", body: JSON.stringify({ modelId }) }),
 
   getSupplierKeys: () => request<SupplierKeySyncDto>("/supplier-sync/keys"),
   syncSupplierKeys: () => request<SupplierKeySyncResultDto>("/supplier-sync/keys", { method: "POST" }),

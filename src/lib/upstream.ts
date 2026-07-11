@@ -151,6 +151,12 @@ export interface OpenAiEndpointTestResult {
   responses: EndpointTestResult;
 }
 
+export interface ProviderModelTestResult {
+  standard: ProviderStandard;
+  modelId: string;
+  results: Array<EndpointTestResult & { endpoint: "messages" | "chat/completions" | "responses" }>;
+}
+
 const ENDPOINT_TEST_TIMEOUT_MS = 20_000;
 
 async function testEndpoint(
@@ -213,6 +219,71 @@ export async function checkOpenAiEndpoints(
     }),
   ]);
   return { chat, responses };
+}
+
+async function testAnthropicMessagesEndpoint(
+  target: { baseUrl: string; apiKey: string },
+  upstreamModelId: string,
+): Promise<EndpointTestResult> {
+  const start = Date.now();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), ENDPOINT_TEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${providerBaseUrl(target.baseUrl)}/v1/messages`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": target.apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: upstreamModelId,
+        max_tokens: 1,
+        messages: [{ role: "user", content: "ping" }],
+      }),
+      signal: controller.signal,
+    });
+    const latencyMs = Date.now() - start;
+    const json = (await response.json().catch(() => undefined)) as
+      | { error?: { message?: string } | string; message?: string }
+      | undefined;
+    const upstreamMessage = typeof json?.error === "string" ? json.error : json?.error?.message ?? json?.message;
+    return response.ok
+      ? { ok: true, statusCode: response.status, latencyMs, message: "OK" }
+      : { ok: false, statusCode: response.status, latencyMs, message: upstreamMessage ?? `Upstream returned ${response.status}` };
+  } catch (err) {
+    const timedOut = err instanceof Error && err.name === "AbortError";
+    return {
+      ok: false,
+      latencyMs: Date.now() - start,
+      message: timedOut ? `Timed out after ${ENDPOINT_TEST_TIMEOUT_MS / 1000}s` : err instanceof Error ? err.message : "Unknown error",
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
+ * Sends the smallest useful real request for a model/provider pair. It is an
+ * operational test (and can spend a few upstream tokens), unlike GET /v1/models.
+ */
+export async function checkProviderModel(
+  target: { standard: ProviderStandard; baseUrl: string; apiKey: string },
+  upstreamModelId: string,
+): Promise<ProviderModelTestResult> {
+  if (target.standard === "anthropic") {
+    const result = await testAnthropicMessagesEndpoint(target, upstreamModelId);
+    return { standard: target.standard, modelId: upstreamModelId, results: [{ endpoint: "messages", ...result }] };
+  }
+  const openAi = await checkOpenAiEndpoints(target, upstreamModelId);
+  return {
+    standard: target.standard,
+    modelId: upstreamModelId,
+    results: [
+      { endpoint: "chat/completions", ...openAi.chat },
+      { endpoint: "responses", ...openAi.responses },
+    ],
+  };
 }
 
 export interface StreamingTestResult {

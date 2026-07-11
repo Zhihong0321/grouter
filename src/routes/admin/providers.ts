@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import { requireAdmin } from "./auth.js";
 import { encryptKey, decryptKey } from "../../lib/keyCrypto.js";
-import { checkProviderHealth, checkOpenAiEndpoints, checkOpenAiStreaming } from "../../lib/upstream.js";
+import { checkProviderHealth, checkOpenAiEndpoints, checkOpenAiStreaming, checkProviderModel } from "../../lib/upstream.js";
 
 interface CreateProviderBody {
   name: string;
@@ -15,6 +15,10 @@ interface UpdateProviderBody {
   baseUrl?: string;
   apiKey?: string;
   active?: boolean;
+}
+
+interface TestProviderModelBody {
+  modelId: string;
 }
 
 function last4(ciphertext: string): string {
@@ -191,6 +195,43 @@ const providersRoutes: FastifyPluginAsync = async (app) => {
     return checkOpenAiStreaming(
       { baseUrl: provider.base_url, apiKey: decryptKey(provider.api_key_encrypted) },
       routeRows[0].upstream_model_id,
+    );
+  });
+
+  // Runs a real tiny request. Imported SubRouter providers are additionally
+  // constrained to the models their individual supplier key reported via
+  // GET /v1/models, so the tester never sends a known-incompatible pair.
+  app.post<{ Params: { id: string }; Body: TestProviderModelBody }>("/admin/api/providers/:id/test-model", async (request, reply) => {
+    const { modelId } = request.body;
+    if (!modelId) return reply.code(400).send({ error: "modelId is required" });
+
+    const { rows: providerRows } = await app.pg.query("SELECT * FROM reseller_providers WHERE id = $1", [request.params.id]);
+    if (providerRows.length === 0) return reply.code(404).send({ error: "Not found" });
+    const provider = providerRows[0];
+
+    const { rows: modelRows } = await app.pg.query("SELECT standard FROM reseller_models WHERE model_id = $1 AND active = true", [modelId]);
+    if (modelRows.length === 0) return reply.code(404).send({ error: "Model is not active" });
+    if (modelRows[0].standard !== provider.standard) {
+      return reply.code(400).send({ error: `Model uses ${modelRows[0].standard}, but provider uses ${provider.standard}` });
+    }
+
+    const { rows: supplierRows } = await app.pg.query(
+      "SELECT id FROM reseller_supplier_keys WHERE provider_id = $1 AND present_on_supplier = true",
+      [provider.id],
+    );
+    if (supplierRows.length > 0) {
+      const { rows: permittedRows } = await app.pg.query(
+        "SELECT 1 FROM reseller_supplier_key_models WHERE supplier_key_id = $1 AND model_id = $2",
+        [supplierRows[0].id, modelId],
+      );
+      if (permittedRows.length === 0) {
+        return reply.code(400).send({ error: "This SubRouter key does not list the selected model as available" });
+      }
+    }
+
+    return checkProviderModel(
+      { standard: provider.standard, baseUrl: provider.base_url, apiKey: decryptKey(provider.api_key_encrypted) },
+      modelId,
     );
   });
 };
