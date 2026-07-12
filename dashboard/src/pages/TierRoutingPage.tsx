@@ -22,14 +22,18 @@ export default function TierRoutingPage() {
 
   const save = async (
     patch: Partial<{
-      brainModel: string;
-      buildModel: string;
-      routineModel: string;
+      anthropicBrainModel: string;
+      anthropicBuildModel: string;
+      anthropicRoutineModel: string;
+      openaiBrainModel: string;
+      openaiBuildModel: string;
+      openaiRoutineModel: string;
       longContextTokens: number;
       shortTurnTokens: number;
       smallFastModelName: string;
       mode: "smart" | "honor_tier";
       honorExplicitRoutine: boolean;
+      routeUnknownOpenai: boolean;
     }>,
   ) => {
     setSaving(true);
@@ -48,25 +52,59 @@ export default function TierRoutingPage() {
     <div>
       <h2>Smart Routing Mode</h2>
       <p style={{ color: "#9aa4b2" }}>
-        Automatic per-request model-tier selection. When enabled on a key (see that key's detail page), the proxy
-        picks the cheapest model that clears the task's quality bar instead of always serving the model the client
-        asked for. This page controls the global tier→model map and thresholds used by every key with it enabled.
+        Automatic per-request model-tier selection. The proxy picks the cheapest model that clears the task's quality
+        bar instead of always serving the model the client asked for. This page controls the global tier→model map and
+        thresholds. Always on (no per-key opt-in). The global kill switch is the Mode setting below.
       </p>
       {error && <p style={{ color: "#ff8080" }}>{error}</p>}
 
       <div className="card">
-        <h3>Tier → model map {saving && "(saving…)"}</h3>
+        <h3>Anthropic tier → model map {saving && "(saving…)"}</h3>
         <div className="form-row">
           <label>Brain (best model)</label>
-          <input defaultValue={config.tiers.brain} onBlur={(e) => e.target.value !== config.tiers.brain && save({ brainModel: e.target.value })} />
+          <input
+            defaultValue={config.tiers.anthropic.brain}
+            onBlur={(e) => e.target.value !== config.tiers.anthropic.brain && save({ anthropicBrainModel: e.target.value })}
+          />
         </div>
         <div className="form-row">
           <label>Build (default coding turns)</label>
-          <input defaultValue={config.tiers.build} onBlur={(e) => e.target.value !== config.tiers.build && save({ buildModel: e.target.value })} />
+          <input
+            defaultValue={config.tiers.anthropic.build}
+            onBlur={(e) => e.target.value !== config.tiers.anthropic.build && save({ anthropicBuildModel: e.target.value })}
+          />
         </div>
         <div className="form-row">
           <label>Routine (cheapest)</label>
-          <input defaultValue={config.tiers.routine} onBlur={(e) => e.target.value !== config.tiers.routine && save({ routineModel: e.target.value })} />
+          <input
+            defaultValue={config.tiers.anthropic.routine}
+            onBlur={(e) => e.target.value !== config.tiers.anthropic.routine && save({ anthropicRoutineModel: e.target.value })}
+          />
+        </div>
+      </div>
+
+      <div className="card">
+        <h3>OpenAI tier → model map {saving && "(saving…)"}</h3>
+        <div className="form-row">
+          <label>Brain (best model)</label>
+          <input
+            defaultValue={config.tiers.openai.brain}
+            onBlur={(e) => e.target.value !== config.tiers.openai.brain && save({ openaiBrainModel: e.target.value })}
+          />
+        </div>
+        <div className="form-row">
+          <label>Build (default coding turns)</label>
+          <input
+            defaultValue={config.tiers.openai.build}
+            onBlur={(e) => e.target.value !== config.tiers.openai.build && save({ openaiBuildModel: e.target.value })}
+          />
+        </div>
+        <div className="form-row">
+          <label>Routine (cheapest)</label>
+          <input
+            defaultValue={config.tiers.openai.routine}
+            onBlur={(e) => e.target.value !== config.tiers.openai.routine && save({ openaiRoutineModel: e.target.value })}
+          />
         </div>
       </div>
 
@@ -100,6 +138,17 @@ export default function TierRoutingPage() {
           />
           <label htmlFor="honor-explicit-routine">
             Honor explicit routine tier (e.g. Codex low reasoning effort) even on long or tool-heavy turns
+          </label>
+        </div>
+        <div className="form-row" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <input
+            type="checkbox"
+            id="route-unknown-openai"
+            checked={config.routeUnknownOpenai}
+            onChange={(e) => save({ routeUnknownOpenai: e.target.checked })}
+          />
+          <label htmlFor="route-unknown-openai">
+            Route unknown OpenAI-compatible clients on /v1/chat/completions (Codex always routed)
           </label>
         </div>
       </div>

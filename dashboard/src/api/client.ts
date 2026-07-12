@@ -39,12 +39,16 @@ export interface ApiKeyDto {
 export type Tier = "brain" | "build" | "routine";
 
 export interface TierConfigDto {
-  tiers: { brain: string; build: string; routine: string };
+  tiers: {
+    anthropic: { brain: string; build: string; routine: string };
+    openai: { brain: string; build: string; routine: string };
+  };
   longContextTokens: number;
   shortTurnTokens: number;
   smallFastModelName: string;
   mode: "smart" | "honor_tier";
   honorExplicitRoutine: boolean;
+  routeUnknownOpenai: boolean;
 }
 
 export interface TierRoutingSavingsDto {
@@ -394,11 +398,18 @@ export const api = {
       brainModel: string;
       buildModel: string;
       routineModel: string;
+      anthropicBrainModel: string;
+      anthropicBuildModel: string;
+      anthropicRoutineModel: string;
+      openaiBrainModel: string;
+      openaiBuildModel: string;
+      openaiRoutineModel: string;
       longContextTokens: number;
       shortTurnTokens: number;
       smallFastModelName: string;
       mode: "smart" | "honor_tier";
       honorExplicitRoutine: boolean;
+      routeUnknownOpenai: boolean;
     }>,
   ) => request<TierConfigDto>("/tier-routing/config", { method: "PATCH", body: JSON.stringify(body) }),
   getTierRoutingSavings: () => request<TierRoutingSavingsDto[]>("/tier-routing/savings"),
