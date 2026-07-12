@@ -47,7 +47,7 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>("loading");
   const [activeTab, setActiveTab] = useState<Tab>("tools");
   const [error, setError] = useState<string | null>(null);
-  const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem("grouter-theme") as Theme) || "light");
+  const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem("grouter-theme") as Theme) || "dark");
 
   // Onboarding form state
   const [username, setUsername] = useState("");
