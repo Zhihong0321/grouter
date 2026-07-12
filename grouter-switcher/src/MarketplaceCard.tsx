@@ -46,10 +46,17 @@ function AgentInstallRow({
       entryId,
       agent,
       (line) => setLogLines((prev) => [...prev, line]),
-      ({ success }) => {
+      ({ success, exitCode }) => {
         stop();
         setRunning(false);
-        setResult({ success, message: success ? "Installed successfully" : "Failed -- see log below" });
+        setResult({
+          success,
+          message: success
+            ? "Installed successfully"
+            : exitCode != null
+              ? `Failed (exit code ${exitCode}) -- see log below`
+              : "Failed -- see log below",
+        });
         onInstalled();
       },
     );
@@ -69,11 +76,11 @@ function AgentInstallRow({
         <StatePill state={state} />
       </div>
       <div className="tool-card-actions">
-        <button onClick={() => void run()} disabled={running}>
+        <button className="btn-secondary" onClick={() => void run()} disabled={running}>
           {running ? "Working..." : state === "installed" ? "Reinstall / Update" : "Install"}
         </button>
         {logLines.length > 0 && (
-          <button className="link" onClick={() => setLogOpen((v) => !v)}>
+          <button className="btn-link btn-link-inline" onClick={() => setLogOpen((v) => !v)}>
             {logOpen ? "Hide log" : "Show log"}
           </button>
         )}
@@ -97,13 +104,21 @@ interface MarketplaceCardProps {
 }
 
 export function MarketplaceCard({ entry, claudeState, codexState, onInstalled }: MarketplaceCardProps) {
+  const availableAgents: MarketplaceAgent[] = [
+    ...(entry.claudeSupported ? (["claude"] as const) : []),
+    ...(entry.codexSupported ? (["codex"] as const) : []),
+  ];
+  const [selectedAgent, setSelectedAgent] = useState<MarketplaceAgent>(availableAgents[0] ?? "claude");
+  const showPicker = availableAgents.length > 1;
+  const activeState = selectedAgent === "claude" ? claudeState : codexState;
+
   return (
     <div className="tool-card">
       <div className="tool-card-head">
         <div>
           <div className="tool-card-title">{entry.label}</div>
           <div className="tool-card-desc">{entry.description}</div>
-          <button className="link marketplace-source-link" onClick={() => void api.openExternal(entry.sourceUrl)}>
+          <button className="btn-link marketplace-source-link" onClick={() => void api.openExternal(entry.sourceUrl)}>
             {entry.sourceUrl.replace(/^https:\/\//, "")}
           </button>
         </div>
@@ -114,8 +129,22 @@ export function MarketplaceCard({ entry, claudeState, codexState, onInstalled }:
       </div>
 
       <div className="marketplace-agents">
-        {entry.claudeSupported && <AgentInstallRow entryId={entry.id} agent="claude" state={claudeState} onInstalled={onInstalled} />}
-        {entry.codexSupported && <AgentInstallRow entryId={entry.id} agent="codex" state={codexState} onInstalled={onInstalled} />}
+        {showPicker && (
+          <div className="seg-row" style={{ alignSelf: "flex-start", width: "auto" }}>
+            {availableAgents.map((a) => (
+              <button
+                key={a}
+                className={selectedAgent === a ? "seg-btn seg-btn-auto active" : "seg-btn seg-btn-auto"}
+                onClick={() => setSelectedAgent(a)}
+              >
+                {AGENT_LABEL[a]}
+              </button>
+            ))}
+          </div>
+        )}
+        {availableAgents.length > 0 && (
+          <AgentInstallRow key={selectedAgent} entryId={entry.id} agent={selectedAgent} state={activeState} onInstalled={onInstalled} />
+        )}
         {!entry.codexSupported && entry.codexNote && <p className="hint">{entry.codexNote}</p>}
       </div>
     </div>

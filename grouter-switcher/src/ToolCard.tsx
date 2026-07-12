@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { api, errorMessage, listenToolLog, ModelInfo, ToolId, ToolInstallStatus, ToolMode, ToolStatus } from "./api";
 
+const MODE_LABELS: Record<ToolMode, string> = {
+  official: "Using official",
+  grouter: "GROUTER API (BYOK)",
+  smart: "GROUTER Smart-Router (BYOK)",
+};
+
 interface ToolCardProps {
   id: ToolId;
   label: string;
@@ -76,12 +82,18 @@ export function ToolCard({
     cliInstalled && install?.latestVersion && install?.version && install.latestVersion !== install.version,
   );
   const mode: ToolMode = !status?.enabled ? "official" : status.smart ? "smart" : "grouter";
+  const enabled = status?.enabled ?? false;
+
+  const statusDotClass = enabled ? "status-dot status-dot-active" : cliInstalled || configurationOnly ? "status-dot status-dot-ok" : "status-dot";
 
   return (
-    <div className="tool-card">
+    <div className={enabled ? "tool-card tool-card-enabled" : "tool-card"}>
       <div className="tool-card-head">
         <div>
-          <div className="tool-card-title">{label}</div>
+          <div className="tool-card-title-row">
+            <span className={statusDotClass} />
+            <span className="tool-card-title">{label}</span>
+          </div>
           <div className="tool-card-desc">{description}</div>
         </div>
         {configurationOnly && !cliInstalled ? (
@@ -97,17 +109,17 @@ export function ToolCard({
 
       <div className="tool-card-actions">
         {!cliInstalled && !configurationOnly && (
-          <button onClick={() => run("install")} disabled={running !== null}>
+          <button className="btn-secondary" onClick={() => run("install")} disabled={running !== null}>
             {running === "install" ? "Installing..." : "Install"}
           </button>
         )}
         {cliInstalled && updateAvailable && (
-          <button onClick={() => run("update")} disabled={running !== null}>
+          <button className="btn-secondary" onClick={() => run("update")} disabled={running !== null}>
             {running === "update" ? "Updating..." : "Update"}
           </button>
         )}
         {logLines.length > 0 && (
-          <button className="link" onClick={() => setLogOpen((v) => !v)}>
+          <button className="btn-link btn-link-inline" onClick={() => setLogOpen((v) => !v)}>
             {logOpen ? "Hide log" : "Show log"}
           </button>
         )}
@@ -122,11 +134,18 @@ export function ToolCard({
       )}
 
       <div className="tool-card-provider">
-        <select value={mode} disabled={toggling || !configurationReady} onChange={(e) => onModeChange(e.target.value as ToolMode)}>
-          <option value="official">Using official</option>
-          <option value="grouter">GROUTER API (BYOK)</option>
-          <option value="smart">GROUTER Smart-Router (BYOK)</option>
-        </select>
+        <div className="seg-row">
+          {(["official", "grouter", "smart"] as ToolMode[]).map((m) => (
+            <button
+              key={m}
+              className={mode === m ? "seg-btn active" : "seg-btn"}
+              disabled={toggling || !configurationReady}
+              onClick={() => onModeChange(m)}
+            >
+              {MODE_LABELS[m]}
+            </button>
+          ))}
+        </div>
         {configurationOnly && (
           <p className="hint">
             All verified OpenAI models use the same GROUTER provider. This selection only sets the default for the next Codex session; changing it re-applies the config automatically.

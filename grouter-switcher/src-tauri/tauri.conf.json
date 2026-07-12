@@ -13,11 +13,13 @@
     "windows": [
       {
         "title": "grouter Switcher",
-        "width": 560,
-        "height": 760,
-        "resizable": false,
+        "width": 1040,
+        "height": 720,
+        "minWidth": 860,
+        "minHeight": 560,
+        "resizable": true,
         "minimizable": true,
-        "maximizable": false
+        "maximizable": true
       }
     ],
     "security": {

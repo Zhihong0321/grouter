@@ -295,9 +295,15 @@ pub fn detect_marketplace_status() -> HashMap<String, MarketplaceStatus> {
 /// Runs an entry's install plan for one agent step by step, streaming output
 /// over the same `tool-log`/`tool-log-done` events tools.rs uses (tagged
 /// `marketplace:<id>:<agent>` so the frontend can tell the streams apart).
-/// Mirrors tools.rs's install_tool: failures are reported via the
-/// `tool-log-done` event, not the Result, so the frontend log view always
-/// gets a terminal event to react to.
+/// Two distinct error-reporting paths, deliberately not both at once:
+/// - A step that never got to run (bad id/agent, or the required binary
+///   isn't on PATH) reports only through the returned `Err` -- there's no
+///   log content yet, so a `tool-log-done` event here would show "see log
+///   below" over an empty log. The frontend's install-call catch handler is
+///   the single source of truth for this case.
+/// - A step that actually ran and failed reports only through the
+///   `tool-log-done` event (success: false) with real stdout/stderr already
+///   in the log, mirroring tools.rs's install_tool.
 #[tauri::command]
 pub async fn install_marketplace_entry(app: AppHandle, id: String, agent: String) -> Result<(), AppError> {
     let entry = entry_for(&id)?;
@@ -311,7 +317,6 @@ pub async fn install_marketplace_entry(app: AppHandle, id: String, agent: String
             } else {
                 format!("\"{}\" is not on PATH", step.program)
             };
-            let _ = app.emit("tool-log-done", ToolLogDonePayload { tool: log_id, success: false, exit_code: None });
             return Err(AppError::NotFound(message));
         }
         let cmd = shell_command(step.program, step.args);
