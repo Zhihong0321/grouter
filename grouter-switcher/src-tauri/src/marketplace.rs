@@ -29,6 +29,9 @@ enum Detect {
     /// `npx skills add -g -a <agent>` places skills at ~/.<agent>/skills/<name>
     /// per the skills CLI's documented global-install convention.
     SkillDir { agent: &'static str, skill: &'static str },
+    /// For plain pip-installed CLIs (not a Claude/Codex plugin at all):
+    /// a console_scripts entry point landing on PATH is the install signal.
+    Binary(&'static str),
 }
 
 struct AgentPlan {
@@ -140,6 +143,25 @@ static ENTRIES: &[MarketplaceEntry] = &[
         codex: None,
         codex_note: Some("This skill targets Claude Code specifically per its own docs; no Codex install path is published."),
     },
+    MarketplaceEntry {
+        id: "crawl4ai",
+        label: "Crawl4AI",
+        description: "Python web-crawling library/CLI for feeding live page content to LLM agents. Not a Claude/Codex plugin -- installs the same regardless of which agent you use it from.",
+        source_url: "https://github.com/unclecode/crawl4ai",
+        windows: true,
+        mac: true,
+        claude: Some(AgentPlan {
+            steps: &[
+                Step { program: "pip", args: &["install", "-U", "crawl4ai"] },
+                Step { program: "crawl4ai-setup", args: &[] },
+            ],
+            detect: Detect::Binary("crawl4ai-doctor"),
+        }),
+        codex: None,
+        codex_note: Some(
+            "Installs the core Python package/CLI only, exactly per its own README -- there's no single official MCP server from this project to auto-wire into Claude/Codex (several unofficial third-party wrappers exist). To actually call it from Claude Code or Codex, register an MCP server yourself once installed.",
+        ),
+    },
 ];
 
 fn entry_for(id: &str) -> Result<&'static MarketplaceEntry, AppError> {
@@ -231,6 +253,13 @@ fn detect_state(detect: &Detect) -> InstallState {
         }
         Detect::SkillDir { agent, skill } => {
             if skill_dir_exists(agent, skill) {
+                InstallState::Installed
+            } else {
+                InstallState::NotInstalled
+            }
+        }
+        Detect::Binary(name) => {
+            if which::which(name).is_ok() {
                 InstallState::Installed
             } else {
                 InstallState::NotInstalled
@@ -405,6 +434,29 @@ mod tests {
     }
 
     #[test]
+    fn binary_detect_reflects_path_membership() {
+        let _guard = lock_env();
+        let dir = sandbox("binary-detect");
+        let fake_bin_dir = dir.join("bin");
+        fs::create_dir_all(&fake_bin_dir).unwrap();
+        fs::write(fake_bin_dir.join("fake-crawl4ai-doctor.cmd"), "@echo off\n").unwrap();
+
+        let original_path = std::env::var("PATH").unwrap_or_default();
+        assert!(which::which("fake-crawl4ai-doctor").is_err());
+        assert!(matches!(detect_state(&Detect::Binary("fake-crawl4ai-doctor")), InstallState::NotInstalled));
+
+        unsafe {
+            std::env::set_var("PATH", format!("{};{}", fake_bin_dir.display(), original_path));
+        }
+        assert!(matches!(detect_state(&Detect::Binary("fake-crawl4ai-doctor")), InstallState::Installed));
+        assert!(matches!(detect_state(&Detect::Binary("definitely-does-not-exist-xyz")), InstallState::NotInstalled));
+
+        unsafe {
+            std::env::set_var("PATH", original_path);
+        }
+    }
+
+    #[test]
     fn detect_state_falls_back_from_installed_to_marketplace_added_to_not_installed() {
         let _guard = lock_env();
         let dir = sandbox("detect-state");
@@ -430,7 +482,7 @@ mod tests {
                 assert!(!plan.steps.is_empty(), "{} has an agent plan with zero steps", entry.id);
                 for step in plan.steps {
                     assert!(
-                        step.program == "claude" || step.program == "npx",
+                        matches!(step.program, "claude" | "npx" | "pip" | "crawl4ai-setup"),
                         "{} uses an unexpected program \"{}\" -- shell_command's Windows .cmd handling has only been verified for these",
                         entry.id,
                         step.program
