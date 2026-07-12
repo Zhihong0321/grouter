@@ -1,5 +1,4 @@
--- Drop dead per-key smart routing flags.
--- Feature shipped as always-on/global; these columns are never read.
+-- Re-add per-key smart routing flags for rollback.
 ALTER TABLE reseller_api_keys
-  DROP COLUMN IF EXISTS smart_routing_claude_code,
-  DROP COLUMN IF EXISTS smart_routing_codex;
+  ADD COLUMN IF NOT EXISTS smart_routing_claude_code boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS smart_routing_codex       boolean NOT NULL DEFAULT false;

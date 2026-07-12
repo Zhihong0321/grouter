@@ -294,27 +294,27 @@ export class SubRouterClient {
   }
 
   async listPricing(): Promise<SubRouterPricingCatalog> {
-    const result = await this.get("/api/models/pricing");
-    if (!isRecord(result.data) || !Array.isArray(result.data.models)) {
+    const result = await this.get("/api/pricing");
+    if (!isRecord(result.data) || !Array.isArray(result.data.data)) {
       throw new SubRouterError("invalid_response", "SubRouter pricing response was invalid");
     }
 
     const models: SubRouterModelPrice[] = [];
-    for (const item of result.data.models) {
+    for (const item of result.data.data) {
       if (!isRecord(item)) continue;
-      if (typeof item.model !== "string" || typeof item.provider !== "string") continue;
+      if (typeof item.model_name !== "string") continue;
 
-      const inputPrice = typeof item.input === "number" ? item.input : Number(item.input);
-      const outputPrice = typeof item.output === "number" ? item.output : Number(item.output);
+      const inputPrice = typeof item.official_input_price === "number" ? item.official_input_price : Number(item.official_input_price);
+      const outputPrice = typeof item.official_output_price === "number" ? item.official_output_price : Number(item.official_output_price);
 
       if (isNaN(inputPrice) || isNaN(outputPrice)) continue;
 
       models.push({
-        model: String(item.model),
-        provider: String(item.provider),
+        model: String(item.model_name),
+        provider: typeof item.vendor_id === "number" ? `vendor_${item.vendor_id}` : "unknown",
         inputPricePerMillion: inputPrice,
         outputPricePerMillion: outputPrice,
-        currency: typeof item.currency === "string" ? item.currency : "USD",
+        currency: "USD",
       });
     }
 
