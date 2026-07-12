@@ -38,10 +38,10 @@ function Pair({ route, model, result, testing, onTest, onPrimary }: {
         {!route.active && <span className="badge revoked" style={{ marginLeft: 6 }}>Unavailable</span>}
       </div>
       <div className="route-pair-actions">
-        <button type="button" className="secondary" onClick={onTest} disabled={testing || !route.active} title="Sends a tiny real request and may use a few upstream tokens">
+        <button type="button" className="secondary" onClick={onTest} disabled={testing || !route.active || !model.active} title="Sends a tiny real request and may use a few upstream tokens">
           {testing ? "Testing…" : "Smoke test"}
         </button>
-        <button type="button" className="secondary" onClick={onPrimary} disabled={!route.active || route.priority === 1}>Make primary</button>
+        <button type="button" className="secondary" onClick={onPrimary} disabled={!route.active || !model.active || route.priority === 1}>Make primary</button>
       </div>
       {summary && <small style={{ color: summary.ok ? "#7ee787" : "#ff8080" }}>{summary.text}</small>}
       <small className="route-model-id">Upstream: {route.upstreamModelId}</small>
@@ -49,14 +49,16 @@ function Pair({ route, model, result, testing, onTest, onPrimary }: {
   );
 }
 
-function ModelSection({ title, description, models, tests, testingPair, onTest, onPrimary }: {
+function ModelSection({ title, description, models, tests, testingPair, updatingModel, onTest, onPrimary, onToggleActive }: {
   title: string;
   description: string;
   models: SmartRoutingModelDto[];
   tests: Record<string, ProviderModelTestResultDto>;
   testingPair: string | null;
+  updatingModel: string | null;
   onTest: (model: SmartRoutingModelDto, route: SmartRouteDto) => void;
   onPrimary: (model: SmartRoutingModelDto, route: SmartRouteDto) => void;
+  onToggleActive: (model: SmartRoutingModelDto) => void;
 }) {
   return (
     <section className="card">
@@ -70,7 +72,18 @@ function ModelSection({ title, description, models, tests, testingPair, onTest, 
               <td>
                 <strong>{model.displayName}</strong>
                 <small className="route-model-id">{model.modelId}</small>
-                {!model.active && <span className="badge revoked">Disabled</span>}
+                <div className="model-status-row">
+                  <span className={`badge ${model.active ? "active" : "revoked"}`}>{model.active ? "Enabled" : "Disabled"}</span>
+                  <button
+                    type="button"
+                    className={model.active ? "danger" : "secondary"}
+                    onClick={() => onToggleActive(model)}
+                    disabled={updatingModel === model.modelId}
+                    title={model.active ? "Stop serving this model and hide it from the public model list" : "Allow this model to be served again"}
+                  >
+                    {updatingModel === model.modelId ? "Saving…" : model.active ? "Disable model" : "Enable model"}
+                  </button>
+                </div>
               </td>
               <td><span className="badge active">{model.standard}</span></td>
               <td>
@@ -94,6 +107,7 @@ function ModelSection({ title, description, models, tests, testingPair, onTest, 
 export default function RouterPage() {
   const [models, setModels] = useState<SmartRoutingModelDto[]>([]);
   const [syncing, setSyncing] = useState(false);
+  const [updatingModel, setUpdatingModel] = useState<string | null>(null);
   const [testingPair, setTestingPair] = useState<string | null>(null);
   const [tests, setTests] = useState<Record<string, ProviderModelTestResultDto>>({});
   const [message, setMessage] = useState<string | null>(null);
@@ -125,6 +139,23 @@ export default function RouterPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Smart sync failed");
     } finally { setSyncing(false); }
+  };
+
+  const toggleModel = async (model: SmartRoutingModelDto) => {
+    setUpdatingModel(model.modelId);
+    setError(null);
+    setMessage(null);
+    try {
+      const updated = await api.updateModel(model.modelId, { active: !model.active });
+      setModels((current) => current.map((candidate) => (
+        candidate.modelId === updated.modelId ? { ...candidate, active: updated.active } : candidate
+      )));
+      setMessage(`${updated.displayName} is now ${updated.active ? "enabled" : "disabled"}${updated.active ? "" : " and will no longer be served"}.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update model status");
+    } finally {
+      setUpdatingModel(null);
+    }
   };
 
   const smokeTest = async (model: SmartRoutingModelDto, route: SmartRouteDto) => {
@@ -163,9 +194,9 @@ export default function RouterPage() {
       {error && <p style={{ color: "#ff8080" }}>{error}</p>}
       {message && <p style={{ color: "#7ee787" }}>{message}</p>}
 
-      <ModelSection title="Anthropic models" description="Priority and backup keys for Claude-family models." models={groups.anthropic} tests={tests} testingPair={testingPair} onTest={smokeTest} onPrimary={makePrimary} />
-      <ModelSection title="OpenAI models" description="Priority and backup keys for GPT and OpenAI-family models." models={groups.openai} tests={tests} testingPair={testingPair} onTest={smokeTest} onPrimary={makePrimary} />
-      <ModelSection title="Other & China models" description="DeepSeek, Qwen, GLM, Kimi, MiniMax and every remaining synced model." models={[...groups.china, ...groups.other]} tests={tests} testingPair={testingPair} onTest={smokeTest} onPrimary={makePrimary} />
+      <ModelSection title="Anthropic models" description="Priority and backup keys for Claude-family models." models={groups.anthropic} tests={tests} testingPair={testingPair} updatingModel={updatingModel} onTest={smokeTest} onPrimary={makePrimary} onToggleActive={toggleModel} />
+      <ModelSection title="OpenAI models" description="Priority and backup keys for GPT and OpenAI-family models." models={groups.openai} tests={tests} testingPair={testingPair} updatingModel={updatingModel} onTest={smokeTest} onPrimary={makePrimary} onToggleActive={toggleModel} />
+      <ModelSection title="Other & China models" description="DeepSeek, Qwen, GLM, Kimi, MiniMax and every remaining synced model." models={[...groups.china, ...groups.other]} tests={tests} testingPair={testingPair} updatingModel={updatingModel} onTest={smokeTest} onPrimary={makePrimary} onToggleActive={toggleModel} />
     </div>
   );
 }
