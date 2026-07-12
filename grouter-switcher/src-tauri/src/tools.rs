@@ -106,17 +106,17 @@ struct ToolLogPayload {
 }
 
 #[derive(Serialize, Clone)]
-struct ToolLogDonePayload {
-    tool: String,
-    success: bool,
+pub(crate) struct ToolLogDonePayload {
+    pub tool: String,
+    pub success: bool,
     #[serde(rename = "exitCode")]
-    exit_code: Option<i32>,
+    pub exit_code: Option<i32>,
 }
 
 /// npm (and some of these CLIs' own installers) ship as `.cmd` shims on
 /// Windows, which `std::process::Command` cannot exec directly -- it needs
 /// cmd.exe to resolve PATHEXT. Elsewhere the resolved binary can run as-is.
-fn shell_command(program: &str, args: &[&str]) -> Command {
+pub(crate) fn shell_command(program: &str, args: &[&str]) -> Command {
     #[cfg(target_os = "windows")]
     {
         let mut c = Command::new("cmd");
@@ -138,7 +138,7 @@ fn shell_command(program: &str, args: &[&str]) -> Command {
 
 /// Runs a command to completion, forwarding each stdout/stderr line to the
 /// frontend as a `tool-log` event as it arrives.
-async fn run_streamed(app: &AppHandle, tool_id: &str, mut cmd: Command) -> Result<(bool, Option<i32>), AppError> {
+pub(crate) async fn run_streamed(app: &AppHandle, tool_id: &str, mut cmd: Command) -> Result<(bool, Option<i32>), AppError> {
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
     cmd.stdin(Stdio::null());

@@ -58,13 +58,16 @@ export interface ToolInstallStatus {
 
 export type InstallStatusResult = Record<ToolId, ToolInstallStatus>;
 
+// `tool` is a plain string, not ToolId -- the same tool-log/tool-log-done
+// event channel also carries marketplace install streams, tagged
+// "marketplace:<entryId>:<agent>" (see listenMarketplaceLog below).
 export interface ToolLogEvent {
-  tool: ToolId;
+  tool: string;
   line: string;
 }
 
 export interface ToolLogDoneEvent {
-  tool: ToolId;
+  tool: string;
   success: boolean;
   exitCode: number | null;
 }
@@ -95,6 +98,28 @@ export interface AppError {
   message: string;
 }
 
+export interface MarketplaceEntryInfo {
+  id: string;
+  label: string;
+  description: string;
+  sourceUrl: string;
+  windows: boolean;
+  mac: boolean;
+  claudeSupported: boolean;
+  codexSupported: boolean;
+  codexNote: string | null;
+}
+
+export type InstallState = "not_installed" | "marketplace_added" | "installed" | "unsupported";
+
+export interface MarketplaceStatus {
+  claude: InstallState;
+  codex: InstallState;
+}
+
+export type MarketplaceStatusResult = Record<string, MarketplaceStatus>;
+export type MarketplaceAgent = "claude" | "codex";
+
 export function errorMessage(err: unknown): string {
   if (err && typeof err === "object" && "message" in err) {
     return String((err as AppError).message);
@@ -119,9 +144,14 @@ export const api = {
   toggleOpencode: (mode: ToolMode) => invoke<void>("toggle_opencode", { mode }),
   detectTools: () => invoke<DetectResult>("detect_tools"),
   openConfigDir: (tool: ToolId) => invoke<void>("open_config_dir", { tool }),
+  openExternal: (url: string) => invoke<void>("open_external", { url }),
   detectInstallations: () => invoke<InstallStatusResult>("detect_installations"),
   installTool: (tool: ToolId) => invoke<void>("install_tool", { tool }),
   updateTool: (tool: ToolId) => invoke<void>("update_tool", { tool }),
+  listMarketplaceEntries: () => invoke<MarketplaceEntryInfo[]>("list_marketplace_entries"),
+  detectMarketplaceStatus: () => invoke<MarketplaceStatusResult>("detect_marketplace_status"),
+  installMarketplaceEntry: (id: string, agent: MarketplaceAgent) =>
+    invoke<void>("install_marketplace_entry", { id, agent }),
 };
 
 // Subscribes to the streamed install/update output for a single tool,
@@ -129,7 +159,7 @@ export const api = {
 // are registered, so callers can await it before triggering the command
 // that emits them. Returns an unsubscribe fn.
 export async function listenToolLog(
-  tool: ToolId,
+  tool: string,
   onLine: (line: string) => void,
   onDone: (result: { success: boolean; exitCode: number | null }) => void,
 ): Promise<() => void> {
@@ -144,4 +174,15 @@ export async function listenToolLog(
     unlistenLog();
     unlistenDone();
   };
+}
+
+// Marketplace installs stream over the same tool-log/tool-log-done channel,
+// tagged "marketplace:<entryId>:<agent>" by the backend (see marketplace.rs).
+export function listenMarketplaceLog(
+  entryId: string,
+  agent: MarketplaceAgent,
+  onLine: (line: string) => void,
+  onDone: (result: { success: boolean; exitCode: number | null }) => void,
+): Promise<() => void> {
+  return listenToolLog(`marketplace:${entryId}:${agent}`, onLine, onDone);
 }

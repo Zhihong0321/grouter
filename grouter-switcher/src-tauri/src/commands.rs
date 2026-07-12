@@ -420,6 +420,18 @@ pub fn open_config_dir(tool: String) -> Result<(), AppError> {
     open::that(dir).map_err(|e| AppError::Io(e.to_string()))
 }
 
+/// Opens a marketplace entry's source URL in the user's default browser.
+/// Only ever called with the static `sourceUrl` values marketplace.rs ships
+/// (never arbitrary user input), but still restricted to http(s) so this
+/// can't be repurposed to launch an arbitrary local file or protocol handler.
+#[tauri::command]
+pub fn open_external(url: String) -> Result<(), AppError> {
+    if !url.starts_with("https://") && !url.starts_with("http://") {
+        return Err(AppError::InvalidKey("Only http(s) URLs can be opened".to_string()));
+    }
+    open::that(url).map_err(|e| AppError::Io(e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

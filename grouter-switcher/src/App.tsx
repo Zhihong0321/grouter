@@ -7,13 +7,16 @@ import {
   VerifyResult,
   UsageResult,
   InstallStatusResult,
+  MarketplaceEntryInfo,
+  MarketplaceStatusResult,
   ToolId,
   ToolMode,
 } from "./api";
 import { ToolCard } from "./ToolCard";
+import { MarketplaceCard } from "./MarketplaceCard";
 
 type Screen = "loading" | "welcome" | "recover" | "saveRecovery" | "main";
-type Tab = "tools" | "usage" | "settings";
+type Tab = "tools" | "marketplace" | "usage" | "settings";
 
 const TOOLS: { id: ToolId; label: string; description: string; modelKind: "anthropic" | "openai" }[] = [
   { id: "claude", label: "Claude Code CLI", description: "Anthropic's coding agent CLI", modelKind: "anthropic" },
@@ -56,6 +59,11 @@ export default function App() {
   const [usage, setUsage] = useState<UsageResult | null>(null);
   const [usageRange, setUsageRange] = useState<"7d" | "30d">("30d");
   const [loadingUsage, setLoadingUsage] = useState(false);
+
+  // Marketplace tab state
+  const [marketplaceEntries, setMarketplaceEntries] = useState<MarketplaceEntryInfo[]>([]);
+  const [marketplaceStatus, setMarketplaceStatus] = useState<MarketplaceStatusResult>({});
+  const [loadingMarketplace, setLoadingMarketplace] = useState(false);
 
   useEffect(() => {
     void bootstrap();
@@ -226,9 +234,24 @@ export default function App() {
     }
   }
 
+  async function loadMarketplace() {
+    setError(null);
+    setLoadingMarketplace(true);
+    try {
+      const [entries, status] = await Promise.all([api.listMarketplaceEntries(), api.detectMarketplaceStatus()]);
+      setMarketplaceEntries(entries);
+      setMarketplaceStatus(status);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setLoadingMarketplace(false);
+    }
+  }
+
   function openTab(tab: Tab) {
     setActiveTab(tab);
     if (tab === "usage" && !usage) void loadUsage(usageRange);
+    if (tab === "marketplace" && marketplaceEntries.length === 0) void loadMarketplace();
   }
 
   async function handleSaveSettings() {
@@ -353,6 +376,9 @@ export default function App() {
         <button className={activeTab === "tools" ? "tab tab-active" : "tab"} onClick={() => openTab("tools")}>
           Tools
         </button>
+        <button className={activeTab === "marketplace" ? "tab tab-active" : "tab"} onClick={() => openTab("marketplace")}>
+          Marketplace
+        </button>
         <button className={activeTab === "usage" ? "tab tab-active" : "tab"} onClick={() => openTab("usage")}>
           Usage
         </button>
@@ -395,6 +421,25 @@ export default function App() {
               toggling={togglingTool === tool.id}
               onModeChange={(mode) => void handleModeChange(tool.id, mode)}
               onInstallOrUpdateFinished={() => void loadInstallStatus()}
+            />
+          ))}
+        </div>
+      )}
+
+      {activeTab === "marketplace" && (
+        <div className="tab-panel">
+          <p className="hint">
+            Curated skills, agents and plugins for Claude Code and Codex. Each install runs the project's own
+            documented command -- nothing here is invented.
+          </p>
+          {loadingMarketplace && <p className="hint">Loading...</p>}
+          {marketplaceEntries.map((entry) => (
+            <MarketplaceCard
+              key={entry.id}
+              entry={entry}
+              claudeState={marketplaceStatus[entry.id]?.claude ?? "not_installed"}
+              codexState={marketplaceStatus[entry.id]?.codex ?? "unsupported"}
+              onInstalled={() => void loadMarketplace()}
             />
           ))}
         </div>

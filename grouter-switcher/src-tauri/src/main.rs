@@ -5,9 +5,12 @@ mod codex;
 mod commands;
 mod config;
 mod error;
+mod marketplace;
 mod opencode;
 mod paths;
 mod state;
+#[cfg(test)]
+mod test_support;
 mod tools;
 mod verify;
 
@@ -31,9 +34,13 @@ fn main() {
             commands::toggle_opencode,
             commands::detect_tools,
             commands::open_config_dir,
+            commands::open_external,
             tools::detect_installations,
             tools::install_tool,
             tools::update_tool,
+            marketplace::list_marketplace_entries,
+            marketplace::detect_marketplace_status,
+            marketplace::install_marketplace_entry,
         ])
         .run(tauri::generate_context!())
         .expect("error while running grouter-switcher");

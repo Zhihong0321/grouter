@@ -277,6 +277,47 @@ button.link {
   margin: 0;
 }
 
+/* Marketplace tab */
+
+.marketplace-source-link {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 11px;
+}
+
+.marketplace-platform-badges {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-end;
+}
+
+.marketplace-agents {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.marketplace-agent-row {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.marketplace-agent-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.marketplace-agent-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
 .drift-banner {
   background: var(--warn-bg);
   color: var(--warn-fg);

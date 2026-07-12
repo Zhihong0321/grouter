@@ -146,6 +146,7 @@ pub fn is_drifted(tool_state: &ToolState, base_url: &str, key: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::lock_env;
     use std::fs;
 
     fn sandbox(name: &str) -> std::path::PathBuf {
@@ -160,6 +161,7 @@ mod tests {
 
     #[test]
     fn apply_on_fresh_dir_writes_provider_and_model() {
+        let _guard = lock_env();
         let dir = sandbox("opencode-fresh");
         let state = apply("https://grouter.example/", "sk-test-key", "gpt-5.4").unwrap();
         assert!(state.enabled);
@@ -178,6 +180,7 @@ mod tests {
 
     #[test]
     fn apply_preserves_other_providers_and_restore_reverts_prior_model() {
+        let _guard = lock_env();
         let dir = sandbox("opencode-preserve");
         fs::create_dir_all(&dir).unwrap();
         fs::write(
@@ -207,6 +210,7 @@ mod tests {
 
     #[test]
     fn restore_removes_model_key_that_did_not_exist_before() {
+        let _guard = lock_env();
         let dir = sandbox("opencode-remove");
         let state = apply("https://grouter.example", "sk-test-key", "gpt-5.4").unwrap();
         restore(&state).unwrap();
@@ -219,6 +223,7 @@ mod tests {
 
     #[test]
     fn drift_detection() {
+        let _guard = lock_env();
         sandbox("opencode-drift");
         let state = apply("https://grouter.example", "sk-test-key", "gpt-5.4").unwrap();
         assert!(!is_drifted(&state, "https://grouter.example", "sk-test-key"));
