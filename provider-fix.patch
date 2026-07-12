@@ -1,0 +1,177 @@
+warning: in the working copy of 'orig-0.tmp', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'staging-0.tmp', LF will be replaced by CRLF the next time Git touches it
+diff --git a/dashboard/src/pages/RouterPage.tsx b/dashboard/src/pages/RouterPage.tsx
+index c667f8d..5b57cd3 100644
+--- a/dashboard/src/pages/RouterPage.tsx
++++ b/dashboard/src/pages/RouterPage.tsx
+@@ -21,13 +21,15 @@ function testSummary(result: ProviderModelTestResultDto | undefined): { text: st
+   return { ok, text: ok ? `Alive · ${latency}ms` : result.results.find((item) => !item.ok)?.message ?? "Failed" };
+ }
+ 
+-function Pair({ route, model, result, testing, onTest, onPrimary }: {
++function Pair({ route, model, result, testing, updatingProvider, onTest, onPrimary, onToggleProvider }: {
+   route: SmartRouteDto;
+   model: SmartRoutingModelDto;
+   result?: ProviderModelTestResultDto;
+   testing: boolean;
++  updatingProvider: string | null;
+   onTest: () => void;
+   onPrimary: () => void;
++  onToggleProvider: () => void;
+ }) {
+   const summary = testSummary(result);
+   return (
+@@ -42,6 +44,9 @@ function Pair({ route, model, result, testing, onTest, onPrimary }: {
+           {testing ? "Testing…" : "Smoke test"}
+         </button>
+         <button type="button" className="secondary" onClick={onPrimary} disabled={!route.active || !model.active || route.priority === 1}>Make primary</button>
++        <button type="button" className={route.providerActive ? "danger" : "secondary"} onClick={onToggleProvider} disabled={updatingProvider === route.providerId} title={route.providerActive ? "Disable this provider for every model it serves" : "Enable this provider again"}>
++          {updatingProvider === route.providerId ? "Saving…" : route.providerActive ? "Disable provider" : "Enable provider"}
++        </button>
+       </div>
+       {summary && <small style={{ color: summary.ok ? "#7ee787" : "#ff8080" }}>{summary.text}</small>}
+       <small className="route-model-id">Upstream: {route.upstreamModelId}</small>
+@@ -49,16 +54,16 @@ function Pair({ route, model, result, testing, onTest, onPrimary }: {
+   );
+ }
+ 
+-function ModelSection({ title, description, models, tests, testingPair, updatingModel, onTest, onPrimary, onToggleActive }: {
++function ModelSection({ title, description, models, tests, testingPair, updatingProvider, onTest, onPrimary, onToggleProvider }: {
+   title: string;
+   description: string;
+   models: SmartRoutingModelDto[];
+   tests: Record<string, ProviderModelTestResultDto>;
+   testingPair: string | null;
+-  updatingModel: string | null;
++  updatingProvider: string | null;
+   onTest: (model: SmartRoutingModelDto, route: SmartRouteDto) => void;
+   onPrimary: (model: SmartRoutingModelDto, route: SmartRouteDto) => void;
+-  onToggleActive: (model: SmartRoutingModelDto) => void;
++  onToggleProvider: (route: SmartRouteDto) => void;
+ }) {
+   return (
+     <section className="card">
+@@ -72,18 +77,7 @@ function ModelSection({ title, description, models, tests, testingPair, updating
+               <td>
+                 <strong>{model.displayName}</strong>
+                 <small className="route-model-id">{model.modelId}</small>
+-                <div className="model-status-row">
+-                  <span className={`badge ${model.active ? "active" : "revoked"}`}>{model.active ? "Enabled" : "Disabled"}</span>
+-                  <button
+-                    type="button"
+-                    className={model.active ? "danger" : "secondary"}
+-                    onClick={() => onToggleActive(model)}
+-                    disabled={updatingModel === model.modelId}
+-                    title={model.active ? "Stop serving this model and hide it from the public model list" : "Allow this model to be served again"}
+-                  >
+-                    {updatingModel === model.modelId ? "Saving…" : model.active ? "Disable model" : "Enable model"}
+-                  </button>
+-                </div>
++                {!model.active && <span className="badge revoked">Disabled</span>
+               </td>
+               <td><span className="badge active">{model.standard}</span></td>
+               <td>
+@@ -91,8 +85,8 @@ function ModelSection({ title, description, models, tests, testingPair, updating
+                   ? <span style={{ color: "#9aa4b2" }}>No compatible active key found. Run Smart sync after adding/syncing keys.</span>
+                   : model.routes.map((route) => {
+                     const id = `${model.modelId}:${route.providerId}`;
+-                    return <Pair key={route.routeId} route={route} model={model} result={tests[id]} testing={testingPair === id}
+-                      onTest={() => onTest(model, route)} onPrimary={() => onPrimary(model, route)} />;
++                    return <Pair key={route.routeId} route={route} model={model} result={tests[id]} testing={testingPair === id} updatingProvider={updatingProvider}
++                      onTest={() => onTest(model, route)} onPrimary={() => onPrimary(model, route)} onToggleProvider={() => onToggleProvider(route)} />;
+                   })}
+               </td>
+             </tr>
+@@ -107,7 +101,7 @@ function ModelSection({ title, description, models, tests, testingPair, updating
+ export default function RouterPage() {
+   const [models, setModels] = useState<SmartRoutingModelDto[]>([]);
+   const [syncing, setSyncing] = useState(false);
+-  const [updatingModel, setUpdatingModel] = useState<string | null>(null);
++  const [updatingProvider, setUpdatingProvider] = useState<string | null>(null);
+   const [testingPair, setTestingPair] = useState<string | null>(null);
+   const [tests, setTests] = useState<Record<string, ProviderModelTestResultDto>>({});
+   const [message, setMessage] = useState<string | null>(null);
+@@ -141,20 +135,18 @@ export default function RouterPage() {
+     } finally { setSyncing(false); }
+   };
+ 
+-  const toggleModel = async (model: SmartRoutingModelDto) => {
+-    setUpdatingModel(model.modelId);
++  const toggleProvider = async (route: SmartRouteDto) => {
++    setUpdatingProvider(route.providerId);
+     setError(null);
+     setMessage(null);
+     try {
+-      const updated = await api.updateModel(model.modelId, { active: !model.active });
+-      setModels((current) => current.map((candidate) => (
+-        candidate.modelId === updated.modelId ? { ...candidate, active: updated.active } : candidate
+-      )));
+-      setMessage(`${updated.displayName} is now ${updated.active ? "enabled" : "disabled"}${updated.active ? "" : " and will no longer be served"}.`);
++      const updated = await api.updateProvider(route.providerId, { active: !route.providerActive });
++      setMessage(`${updated.name} is now ${updated.active ? "enabled" : "disabled"} for all routed models.`);
++      await load();
+     } catch (err) {
+-      setError(err instanceof Error ? err.message : "Failed to update model status");
++      setError(err instanceof Error ? err.message : "Failed to update provider status");
+     } finally {
+-      setUpdatingModel(null);
++      setUpdatingProvider(null);
+     }
+   };
+ 
+@@ -194,9 +186,9 @@ export default function RouterPage() {
+       {error && <p style={{ color: "#ff8080" }}>{error}</p>}
+       {message && <p style={{ color: "#7ee787" }}>{message}</p>}
+ 
+-      <ModelSection title="Anthropic models" description="Priority and backup keys for Claude-family models." models={groups.anthropic} tests={tests} testingPair={testingPair} updatingModel={updatingModel} onTest={smokeTest} onPrimary={makePrimary} onToggleActive={toggleModel} />
+-      <ModelSection title="OpenAI models" description="Priority and backup keys for GPT and OpenAI-family models." models={groups.openai} tests={tests} testingPair={testingPair} updatingModel={updatingModel} onTest={smokeTest} onPrimary={makePrimary} onToggleActive={toggleModel} />
+-      <ModelSection title="Other & China models" description="DeepSeek, Qwen, GLM, Kimi, MiniMax and every remaining synced model." models={[...groups.china, ...groups.other]} tests={tests} testingPair={testingPair} updatingModel={updatingModel} onTest={smokeTest} onPrimary={makePrimary} onToggleActive={toggleModel} />
++      <ModelSection title="Anthropic models" description="Priority and backup keys for Claude-family models." models={groups.anthropic} tests={tests} testingPair={testingPair} updatingProvider={updatingProvider} onTest={smokeTest} onPrimary={makePrimary} onToggleProvider={toggleProvider} />
++      <ModelSection title="OpenAI models" description="Priority and backup keys for GPT and OpenAI-family models." models={groups.openai} tests={tests} testingPair={testingPair} updatingProvider={updatingProvider} onTest={smokeTest} onPrimary={makePrimary} onToggleProvider={toggleProvider} />
++      <ModelSection title="Other & China models" description="DeepSeek, Qwen, GLM, Kimi, MiniMax and every remaining synced model." models={[...groups.china, ...groups.other]} tests={tests} testingPair={testingPair} updatingProvider={updatingProvider} onTest={smokeTest} onPrimary={makePrimary} onToggleProvider={toggleProvider} />
+     </div>
+   );
+ }
+warning: in the working copy of 'orig-1.tmp', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'staging-1.tmp', LF will be replaced by CRLF the next time Git touches it
+diff --git a/dashboard/src/styles.css b/dashboard/src/styles.css
+index 6b86267..7617900 100644
+--- a/dashboard/src/styles.css
++++ b/dashboard/src/styles.css
+@@ -36,7 +36,5 @@ button.danger { background: #c0392b; }
+ .route-pair:last-child { border-bottom: 0; }
+ .route-pair-actions { display: inline-flex; gap: 6px; margin: 6px 0; }
+ .route-pair-actions button { padding: 5px 8px; font-size: 12px; }
+-.model-status-row { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+-.model-status-row button { padding: 4px 8px; font-size: 12px; }
+ .route-model-id { display: block; color: #9aa4b2; font-family: monospace; font-size: 11px; margin-top: 4px; }
+ @media (max-width: 700px) { .smart-routing-header { align-items: flex-start; flex-direction: column; } .smart-routing-table { min-width: 680px; } .card { overflow-x: auto; } }
+warning: in the working copy of 'orig-2.tmp', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'staging-2.tmp', LF will be replaced by CRLF the next time Git touches it
+diff --git a/dashboard/src/api/client.ts b/dashboard/src/api/client.ts
+index cdfde8e..29701fd 100644
+--- a/dashboard/src/api/client.ts
++++ b/dashboard/src/api/client.ts
+@@ -228,6 +228,7 @@ export interface SmartRouteDto {
+   providerName: string;
+   priority: number;
+   active: boolean;
++  providerActive: boolean;
+   upstreamModelId: string;
+   keyLast4: string | null;
+   smokeHistory: { ok: boolean; latencyMs: number; message: string; testedAt: string }[];
+warning: in the working copy of 'orig-3.tmp', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'staging-3.tmp', LF will be replaced by CRLF the next time Git touches it
+diff --git a/src/routes/admin/supplierSync.ts b/src/routes/admin/supplierSync.ts
+index d088938..7b2cfc2 100644
+--- a/src/routes/admin/supplierSync.ts
++++ b/src/routes/admin/supplierSync.ts
+@@ -290,7 +290,7 @@ const supplierSyncRoutes: FastifyPluginAsync = async (app) => {
+       `SELECT m.model_id, m.brand, m.standard, m.display_name, m.active,
+               COALESCE(json_agg(json_build_object(
+                 'routeId', r.id, 'providerId', p.id, 'providerName', p.name,
+-                'priority', r.priority, 'active', r.active AND p.active,
++                'priority', r.priority, 'active', r.active AND p.active, 'providerActive', p.active,
+                 'upstreamModelId', r.upstream_model_id, 'keyLast4', k.key_last4
+               ) ORDER BY r.priority) FILTER (WHERE r.id IS NOT NULL), '[]'::json) AS routes
+        FROM reseller_models m

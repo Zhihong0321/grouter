@@ -4,7 +4,7 @@ use tauri::State;
 use crate::config::BOOTSTRAP_SECRET;
 use crate::error::AppError;
 use crate::state::{AppState, ToolState};
-use crate::{claude, codex, verify};
+use crate::{claude, codex, opencode, verify};
 
 const KEYCHAIN_SERVICE: &str = "grouter-switcher";
 const KEYCHAIN_API_KEY_USER: &str = "api-key";
@@ -223,6 +223,7 @@ pub async fn get_usage(state: State<'_, AppState>, range: Option<String>) -> Res
 pub struct ToolStatusResult {
     pub installed: bool,
     pub enabled: bool,
+    pub smart: bool,
     pub drifted: bool,
 }
 
@@ -230,6 +231,7 @@ pub struct ToolStatusResult {
 pub struct StatusResult {
     pub claude: ToolStatusResult,
     pub codex: ToolStatusResult,
+    pub opencode: ToolStatusResult,
     #[serde(rename = "baseUrl")]
     pub base_url: String,
     #[serde(rename = "selectedAnthropicModel")]
@@ -247,12 +249,20 @@ pub async fn get_status(state: State<'_, AppState>) -> Result<StatusResult, AppE
         claude: ToolStatusResult {
             installed: crate::paths::claude_config_dir().exists(),
             enabled: s.claude.enabled,
+            smart: s.claude.smart,
             drifted: claude::is_drifted(&s.claude, &s.base_url, &key),
         },
         codex: ToolStatusResult {
             installed: crate::paths::codex_config_dir().exists(),
             enabled: s.codex.enabled,
+            smart: s.codex.smart,
             drifted: codex::is_drifted(&s.codex, &s.base_url, &key),
+        },
+        opencode: ToolStatusResult {
+            installed: crate::paths::opencode_config_dir().exists(),
+            enabled: s.opencode.enabled,
+            smart: s.opencode.smart,
+            drifted: opencode::is_drifted(&s.opencode, &s.base_url, &key),
         },
         base_url: s.base_url.clone(),
         selected_anthropic_model: s.selected_anthropic_model.clone(),
@@ -288,35 +298,94 @@ pub async fn set_config(
     s.save().map_err(|e| AppError::Io(e.to_string()))
 }
 
+/// Three-way mode a tool card can be set to: "official" (grouter untouched),
+/// "grouter" (pinned model), or "smart" (grouter's always-on tier router --
+/// see src/lib/tierRouting.ts -- picks the model per request, so no pin is
+/// sent for Claude Code; Codex/OpenCode still need *a* model value to boot
+/// but the server may still override it per request).
 #[tauri::command]
-pub async fn toggle_claude(state: State<'_, AppState>, on: bool) -> Result<(), AppError> {
+pub async fn toggle_claude(state: State<'_, AppState>, mode: String) -> Result<(), AppError> {
     let mut s = state.0.lock().await;
-    if on {
-        let key = load_secret(KEYCHAIN_API_KEY_USER)?.ok_or_else(|| AppError::NotFound("No local key -- apply for one first".to_string()))?;
-        let base_url = s.base_url.clone();
-        let model = s.selected_anthropic_model.clone();
-        s.claude = claude::apply(&base_url, &key, model.as_deref())?;
-    } else {
+    if mode == "official" {
         claude::restore(&s.claude)?;
         s.claude = ToolState::default();
+    } else {
+        let key = load_secret(KEYCHAIN_API_KEY_USER)?.ok_or_else(|| AppError::NotFound("No local key -- apply for one first".to_string()))?;
+        let base_url = s.base_url.clone();
+        let smart = mode == "smart";
+        let model = if smart { None } else { s.selected_anthropic_model.clone() };
+        let mut tool_state = claude::apply(&base_url, &key, model.as_deref())?;
+        tool_state.smart = smart;
+        s.claude = tool_state;
     }
     s.save().map_err(|e| AppError::Io(e.to_string()))
 }
 
 #[tauri::command]
-pub async fn toggle_codex(state: State<'_, AppState>, on: bool) -> Result<(), AppError> {
+pub async fn toggle_codex(state: State<'_, AppState>, mode: String) -> Result<(), AppError> {
+    if mode == "official" {
+        let mut s = state.0.lock().await;
+        codex::restore(&s.codex)?;
+        s.codex = ToolState::default();
+        return s.save().map_err(|e| AppError::Io(e.to_string()));
+    }
+
+    let (base_url, selected_model, previous_snapshot) = {
+        let s = state.0.lock().await;
+        (
+            s.base_url.clone(),
+            s.selected_openai_model.clone(),
+            if s.codex.enabled {
+                Some(s.codex.snapshot.clone())
+            } else {
+                None
+            },
+        )
+    };
+    let key = load_secret(KEYCHAIN_API_KEY_USER)?.ok_or_else(|| {
+        AppError::NotFound("No local key -- apply for one first".to_string())
+    })?;
+
+    // A model is optional in the UI. If the user did not choose a default,
+    // use the first currently available GROUTER model so Codex can start.
+    let model = match selected_model.filter(|model| !model.is_empty()) {
+        Some(model) => model,
+        None => verify::verify_key(&base_url, &key)
+            .await?
+            .open_ai_models
+            .into_iter()
+            .next()
+            .map(|model| model.id)
+            .ok_or_else(|| AppError::NotFound("GROUTER returned no OpenAI models".to_string()))?,
+    };
+
     let mut s = state.0.lock().await;
-    if on {
+    let mut tool_state = match previous_snapshot.as_ref() {
+        Some(snapshot) => codex::apply_with_snapshot(&base_url, &key, &model, Some(snapshot))?,
+        None => codex::apply(&base_url, &key, &model)?,
+    };
+    tool_state.smart = mode == "smart";
+    s.selected_openai_model = Some(model);
+    s.codex = tool_state;
+    s.save().map_err(|e| AppError::Io(e.to_string()))
+}
+
+#[tauri::command]
+pub async fn toggle_opencode(state: State<'_, AppState>, mode: String) -> Result<(), AppError> {
+    let mut s = state.0.lock().await;
+    if mode == "official" {
+        opencode::restore(&s.opencode)?;
+        s.opencode = ToolState::default();
+    } else {
         let key = load_secret(KEYCHAIN_API_KEY_USER)?.ok_or_else(|| AppError::NotFound("No local key -- apply for one first".to_string()))?;
         let base_url = s.base_url.clone();
         let model = s
             .selected_openai_model
             .clone()
-            .ok_or_else(|| AppError::InvalidKey("Codex requires a model to be selected first".to_string()))?;
-        s.codex = codex::apply(&base_url, &key, &model)?;
-    } else {
-        codex::restore(&s.codex)?;
-        s.codex = ToolState::default();
+            .ok_or_else(|| AppError::InvalidKey("OpenCode requires a model to be selected first".to_string()))?;
+        let mut tool_state = opencode::apply(&base_url, &key, &model)?;
+        tool_state.smart = mode == "smart";
+        s.opencode = tool_state;
     }
     s.save().map_err(|e| AppError::Io(e.to_string()))
 }
@@ -327,6 +396,8 @@ pub struct DetectResult {
     pub claude_config_exists: bool,
     #[serde(rename = "codexConfigExists")]
     pub codex_config_exists: bool,
+    #[serde(rename = "opencodeConfigExists")]
+    pub opencode_config_exists: bool,
 }
 
 #[tauri::command]
@@ -334,6 +405,7 @@ pub fn detect_tools() -> DetectResult {
     DetectResult {
         claude_config_exists: crate::paths::claude_config_dir().exists(),
         codex_config_exists: crate::paths::codex_config_dir().exists(),
+        opencode_config_exists: crate::paths::opencode_config_dir().exists(),
     }
 }
 
@@ -342,6 +414,7 @@ pub fn open_config_dir(tool: String) -> Result<(), AppError> {
     let dir = match tool.as_str() {
         "claude" => crate::paths::claude_config_dir(),
         "codex" => crate::paths::codex_config_dir(),
+        "opencode" => crate::paths::opencode_config_dir(),
         other => return Err(AppError::NotFound(format!("Unknown tool \"{other}\""))),
     };
     open::that(dir).map_err(|e| AppError::Io(e.to_string()))

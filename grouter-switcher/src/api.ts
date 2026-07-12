@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 export interface ModelInfo {
   id: string;
@@ -22,15 +23,19 @@ export interface BalanceResult {
   unlimited: boolean;
 }
 
+export type ToolMode = "official" | "grouter" | "smart";
+
 export interface ToolStatus {
   installed: boolean;
   enabled: boolean;
+  smart: boolean;
   drifted: boolean;
 }
 
 export interface StatusResult {
   claude: ToolStatus;
   codex: ToolStatus;
+  opencode: ToolStatus;
   baseUrl: string;
   selectedAnthropicModel: string | null;
   selectedOpenAiModel: string | null;
@@ -39,6 +44,29 @@ export interface StatusResult {
 export interface DetectResult {
   claudeConfigExists: boolean;
   codexConfigExists: boolean;
+  opencodeConfigExists: boolean;
+}
+
+export type ToolId = "claude" | "codex" | "opencode";
+
+export interface ToolInstallStatus {
+  installed: boolean;
+  version: string | null;
+  latestVersion: string | null;
+  path: string | null;
+}
+
+export type InstallStatusResult = Record<ToolId, ToolInstallStatus>;
+
+export interface ToolLogEvent {
+  tool: ToolId;
+  line: string;
+}
+
+export interface ToolLogDoneEvent {
+  tool: ToolId;
+  success: boolean;
+  exitCode: number | null;
 }
 
 export interface UsageEntry {
@@ -86,8 +114,34 @@ export const api = {
   verifyStoredKey: () => invoke<VerifyResult>("verify_stored_key"),
   setConfig: (baseUrl: string, anthropicModel?: string, openAiModel?: string) =>
     invoke<void>("set_config", { baseUrl, anthropicModel, openAiModel }),
-  toggleClaude: (on: boolean) => invoke<void>("toggle_claude", { on }),
-  toggleCodex: (on: boolean) => invoke<void>("toggle_codex", { on }),
+  toggleClaude: (mode: ToolMode) => invoke<void>("toggle_claude", { mode }),
+  toggleCodex: (mode: ToolMode) => invoke<void>("toggle_codex", { mode }),
+  toggleOpencode: (mode: ToolMode) => invoke<void>("toggle_opencode", { mode }),
   detectTools: () => invoke<DetectResult>("detect_tools"),
-  openConfigDir: (tool: "claude" | "codex") => invoke<void>("open_config_dir", { tool }),
+  openConfigDir: (tool: ToolId) => invoke<void>("open_config_dir", { tool }),
+  detectInstallations: () => invoke<InstallStatusResult>("detect_installations"),
+  installTool: (tool: ToolId) => invoke<void>("install_tool", { tool }),
+  updateTool: (tool: ToolId) => invoke<void>("update_tool", { tool }),
 };
+
+// Subscribes to the streamed install/update output for a single tool,
+// filtering out events meant for other tools. Resolves once both listeners
+// are registered, so callers can await it before triggering the command
+// that emits them. Returns an unsubscribe fn.
+export async function listenToolLog(
+  tool: ToolId,
+  onLine: (line: string) => void,
+  onDone: (result: { success: boolean; exitCode: number | null }) => void,
+): Promise<() => void> {
+  const unlistenLog = await listen<ToolLogEvent>("tool-log", (event) => {
+    if (event.payload.tool === tool) onLine(event.payload.line);
+  });
+  const unlistenDone = await listen<ToolLogDoneEvent>("tool-log-done", (event) => {
+    if (event.payload.tool === tool) onDone({ success: event.payload.success, exitCode: event.payload.exitCode });
+  });
+
+  return () => {
+    unlistenLog();
+    unlistenDone();
+  };
+}

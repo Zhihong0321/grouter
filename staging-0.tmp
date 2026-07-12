@@ -49,11 +49,6 @@ function Pair({ route, model, result, testing, updatingProvider, onTest, onPrima
         </button>
       </div>
       {summary && <small style={{ color: summary.ok ? "#7ee787" : "#ff8080" }}>{summary.text}</small>}
-      {route.smokeHistory.length > 0 && (
-        <small className="route-history">
-          Last {route.smokeHistory.length}: {route.smokeHistory.map((sample) => `${sample.ok ? "✓" : "×"} ${sample.latencyMs}ms`).join(" · ")}
-        </small>
-      )}
       <small className="route-model-id">Upstream: {route.upstreamModelId}</small>
     </div>
   );
@@ -82,7 +77,7 @@ function ModelSection({ title, description, models, tests, testingPair, updating
               <td>
                 <strong>{model.displayName}</strong>
                 <small className="route-model-id">{model.modelId}</small>
-                {!model.active && <span className="badge revoked">Disabled</span>}
+                {!model.active && <span className="badge revoked">Disabled</span>
               </td>
               <td><span className="badge active">{model.standard}</span></td>
               <td>
@@ -106,9 +101,8 @@ function ModelSection({ title, description, models, tests, testingPair, updating
 export default function RouterPage() {
   const [models, setModels] = useState<SmartRoutingModelDto[]>([]);
   const [syncing, setSyncing] = useState(false);
-  const [bulkTesting, setBulkTesting] = useState(false);
-  const [testingPair, setTestingPair] = useState<string | null>(null);
   const [updatingProvider, setUpdatingProvider] = useState<string | null>(null);
+  const [testingPair, setTestingPair] = useState<string | null>(null);
   const [tests, setTests] = useState<Record<string, ProviderModelTestResultDto>>({});
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -179,17 +173,6 @@ export default function RouterPage() {
     }
   };
 
-  const smokeTestAll = async () => {
-    setBulkTesting(true); setError(null); setMessage(null);
-    try {
-      const result = await api.smokeTestAllSmartRoutes();
-      setMessage(`Quick smoke test completed: ${result.passed}/${result.tested} route(s) alive${result.failed ? `; ${result.failed} failed` : ""}.`);
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Quick smoke test failed");
-    } finally { setBulkTesting(false); }
-  };
-
   return (
     <div>
       <div className="smart-routing-header">
@@ -197,12 +180,7 @@ export default function RouterPage() {
           <h2>Smart Routing</h2>
           <p>Sync keys once. The dashboard discovers every available model, pairs it to compatible keys, and appends new keys as backups without replacing your chosen primary.</p>
         </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button type="button" className="secondary" onClick={smokeTestAll} disabled={syncing || bulkTesting} title="Tests every active key/model pair and records its last five latency samples">
-            {bulkTesting ? "Quick testing all routes…" : "Quick smoke test all"}
-          </button>
-          <button type="button" onClick={smartSync} disabled={syncing || bulkTesting}>{syncing ? "Syncing keys, models & routes…" : "Smart sync SubRouter"}</button>
-        </div>
+        <button type="button" onClick={smartSync} disabled={syncing}>{syncing ? "Syncing keys, models & routes…" : "Smart sync SubRouter"}</button>
       </div>
       <p style={{ color: "#9aa4b2", fontSize: 13 }}>Smoke tests send a tiny real request and show the observed latency. They can use a small number of upstream tokens.</p>
       {error && <p style={{ color: "#ff8080" }}>{error}</p>}

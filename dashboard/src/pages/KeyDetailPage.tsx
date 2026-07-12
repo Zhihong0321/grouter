@@ -62,32 +62,6 @@ export default function KeyDetailPage() {
       </div>
 
       <div className="card">
-        <h3>Smart Routing Mode</h3>
-        <p style={{ color: "#9aa4b2" }}>
-          Automatically picks the cheapest model tier (brain / build / routine) that clears the quality bar for each
-          request, instead of always serving the model the client asked for. Enabled separately per client.
-        </p>
-        <div className="form-row" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          <input
-            type="checkbox"
-            id="smart-routing-cc"
-            checked={key.smartRoutingClaudeCode}
-            onChange={(e) => save({ smartRoutingClaudeCode: e.target.checked })}
-          />
-          <label htmlFor="smart-routing-cc">Claude Code</label>
-        </div>
-        <div className="form-row" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          <input
-            type="checkbox"
-            id="smart-routing-codex"
-            checked={key.smartRoutingCodex}
-            onChange={(e) => save({ smartRoutingCodex: e.target.checked })}
-          />
-          <label htmlFor="smart-routing-codex">Codex</label>
-        </div>
-      </div>
-
-      <div className="card">
         <div style={{ display: "flex", justifyContent: "space-between" }}>
           <h3>Usage breakdown</h3>
           <div>

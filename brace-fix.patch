@@ -1,0 +1,11 @@
+diff --git a/dashboard/src/pages/RouterPage.tsx b/dashboard/src/pages/RouterPage.tsx
+--- a/dashboard/src/pages/RouterPage.tsx
++++ b/dashboard/src/pages/RouterPage.tsx
+@@ -78,7 +78,7 @@ function ModelSection({ title, description, models, tests, testingPair, updatingProvider, onTest, onPrimary, onToggleProvider }: {
+                <td>
+                  <strong>{model.displayName}</strong>
+                  <small className="route-model-id">{model.modelId}</small>
+-                {!model.active && <span className="badge revoked">Disabled</span>
++                {!model.active && <span className="badge revoked">Disabled</span>}
+                </td>
+                <td><span className="badge active">{model.standard}</span></td>

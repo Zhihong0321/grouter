@@ -1,10 +1,34 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, errorMessage, StatusResult, BalanceResult, VerifyResult, UsageResult } from "./api";
+import {
+  api,
+  errorMessage,
+  StatusResult,
+  BalanceResult,
+  VerifyResult,
+  UsageResult,
+  InstallStatusResult,
+  ToolId,
+  ToolMode,
+} from "./api";
+import { ToolCard } from "./ToolCard";
 
-type Screen = "loading" | "welcome" | "recover" | "saveRecovery" | "switcher" | "usage";
+type Screen = "loading" | "welcome" | "recover" | "saveRecovery" | "main";
+type Tab = "tools" | "usage" | "settings";
+
+const TOOLS: { id: ToolId; label: string; description: string; modelKind: "anthropic" | "openai" }[] = [
+  { id: "claude", label: "Claude Code CLI", description: "Anthropic's coding agent CLI", modelKind: "anthropic" },
+  {
+    id: "codex",
+    label: "Codex Desktop App + CLI",
+    description: "GROUTER BYOK for Codex Desktop, CLI, and IDE (shared config)",
+    modelKind: "openai",
+  },
+  { id: "opencode", label: "OpenCode", description: "Open-source terminal coding agent", modelKind: "openai" },
+];
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>("loading");
+  const [activeTab, setActiveTab] = useState<Tab>("tools");
   const [error, setError] = useState<string | null>(null);
 
   // Onboarding form state
@@ -16,20 +40,19 @@ export default function App() {
   const [confirmedSaved, setConfirmedSaved] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  // Switcher screen state
+  // Main screen state
   const [status, setStatus] = useState<StatusResult | null>(null);
   const [balance, setBalance] = useState<BalanceResult | null>(null);
+  const [installStatus, setInstallStatus] = useState<InstallStatusResult | null>(null);
   const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null);
   const [verifying, setVerifying] = useState(false);
   const [baseUrl, setBaseUrl] = useState("");
   const [anthropicModel, setAnthropicModel] = useState("");
   const [openAiModel, setOpenAiModel] = useState("");
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [togglingClaude, setTogglingClaude] = useState(false);
-  const [togglingCodex, setTogglingCodex] = useState(false);
+  const [togglingTool, setTogglingTool] = useState<ToolId | null>(null);
   const [showRestartReminder, setShowRestartReminder] = useState(false);
 
-  // Usage log screen state
+  // Usage tab state
   const [usage, setUsage] = useState<UsageResult | null>(null);
   const [usageRange, setUsageRange] = useState<"7d" | "30d">("30d");
   const [loadingUsage, setLoadingUsage] = useState(false);
@@ -42,7 +65,7 @@ export default function App() {
     try {
       const hasKey = await api.hasLocalKey();
       if (hasKey) {
-        await loadSwitcher();
+        await loadMain();
       } else {
         setScreen("welcome");
       }
@@ -52,7 +75,7 @@ export default function App() {
     }
   }
 
-  async function loadSwitcher() {
+  async function loadMain() {
     const [statusResult, balanceResult] = await Promise.all([
       api.getStatus(),
       api.getBalance().catch(() => null),
@@ -62,7 +85,16 @@ export default function App() {
     setBaseUrl(statusResult.baseUrl);
     setAnthropicModel(statusResult.selectedAnthropicModel ?? "");
     setOpenAiModel(statusResult.selectedOpenAiModel ?? "");
-    setScreen("switcher");
+    setScreen("main");
+    void loadInstallStatus();
+  }
+
+  async function loadInstallStatus() {
+    try {
+      setInstallStatus(await api.detectInstallations());
+    } catch (err) {
+      setError(errorMessage(err));
+    }
   }
 
   async function handleApply(e: FormEvent) {
@@ -102,7 +134,7 @@ export default function App() {
     setSubmitting(true);
     try {
       await api.recoverAccount(recoverInput);
-      await loadSwitcher();
+      await loadMain();
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -113,7 +145,7 @@ export default function App() {
   async function handleContinueFromSave() {
     setError(null);
     try {
-      await loadSwitcher();
+      await loadMain();
     } catch (err) {
       setError(errorMessage(err));
     }
@@ -136,37 +168,47 @@ export default function App() {
     await api.setConfig(baseUrl, nextAnthropicModel || undefined, nextOpenAiModel || undefined);
   }
 
-  async function handleToggleClaude(on: boolean) {
+  async function handleModelChange(tool: ToolId, value: string) {
+    if (tool === "claude") {
+      setAnthropicModel(value);
+      return;
+    }
+
+    setOpenAiModel(value);
+    if (tool !== "codex" || !value || !status?.codex.enabled) return;
+
     setError(null);
-    setTogglingClaude(true);
+    setTogglingTool("codex");
     try {
-      await persistConfig(anthropicModel, openAiModel);
-      await api.toggleClaude(on);
-      await loadSwitcher();
+      await persistConfig(anthropicModel, value);
+      await api.toggleCodex(status.codex.smart ? "smart" : "grouter");
+      await loadMain();
       setShowRestartReminder(true);
     } catch (err) {
       setError(errorMessage(err));
     } finally {
-      setTogglingClaude(false);
+      setTogglingTool(null);
     }
   }
 
-  async function handleToggleCodex(on: boolean) {
+  async function handleModeChange(tool: ToolId, mode: ToolMode) {
     setError(null);
-    if (on && !openAiModel) {
-      setError("Select a Codex model before turning it on");
+    if (mode !== "official" && tool === "opencode" && !openAiModel) {
+      setError("Select a model before turning OpenCode on");
       return;
     }
-    setTogglingCodex(true);
+    setTogglingTool(tool);
     try {
       await persistConfig(anthropicModel, openAiModel);
-      await api.toggleCodex(on);
-      await loadSwitcher();
+      if (tool === "claude") await api.toggleClaude(mode);
+      else if (tool === "codex") await api.toggleCodex(mode);
+      else await api.toggleOpencode(mode);
+      await loadMain();
       setShowRestartReminder(true);
     } catch (err) {
       setError(errorMessage(err));
     } finally {
-      setTogglingCodex(false);
+      setTogglingTool(null);
     }
   }
 
@@ -184,16 +226,16 @@ export default function App() {
     }
   }
 
-  async function handleOpenUsage() {
-    setScreen("usage");
-    await loadUsage(usageRange);
+  function openTab(tab: Tab) {
+    setActiveTab(tab);
+    if (tab === "usage" && !usage) void loadUsage(usageRange);
   }
 
-  async function handleSaveAdvanced() {
+  async function handleSaveSettings() {
     setError(null);
     try {
       await persistConfig(anthropicModel, openAiModel);
-      await loadSwitcher();
+      await loadMain();
     } catch (err) {
       setError(errorMessage(err));
     }
@@ -289,161 +331,142 @@ export default function App() {
     );
   }
 
-  if (screen === "usage") {
-    const totalTokens =
-      (usage?.inputTokens ?? 0) +
-      (usage?.outputTokens ?? 0) +
-      (usage?.cacheCreationInputTokens ?? 0) +
-      (usage?.cacheReadInputTokens ?? 0);
-    return (
-      <div className="app">
-        <h1>Usage</h1>
-        {error && <div className="error">{error}</div>}
+  // screen === "main"
+  const totalTokens =
+    (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0) + (usage?.cacheCreationInputTokens ?? 0) + (usage?.cacheReadInputTokens ?? 0);
 
-        <div className="usage-range">
-          <button className={usageRange === "7d" ? "" : "link"} onClick={() => loadUsage("7d")} disabled={loadingUsage}>
-            7 days
-          </button>
-          <button className={usageRange === "30d" ? "" : "link"} onClick={() => loadUsage("30d")} disabled={loadingUsage}>
-            30 days
-          </button>
-        </div>
-
-        {loadingUsage && <p className="hint">Loading...</p>}
-
-        {usage && !loadingUsage && (
-          <>
-            <div className="usage-summary">
-              <div>
-                <span className="usage-summary-value">{usage.requestCount}</span>
-                <span className="usage-summary-label">requests</span>
-              </div>
-              <div>
-                <span className="usage-summary-value">${(usage.costCents / 100).toFixed(2)}</span>
-                <span className="usage-summary-label">spent</span>
-              </div>
-              <div>
-                <span className="usage-summary-value">{totalTokens.toLocaleString()}</span>
-                <span className="usage-summary-label">tokens</span>
-              </div>
-            </div>
-
-            <div className="usage-table">
-              <div className="usage-row usage-row-header">
-                <span>When</span>
-                <span>Model</span>
-                <span>Tokens</span>
-                <span>Cost</span>
-              </div>
-              {usage.recent.length === 0 && <p className="hint">No usage yet.</p>}
-              {usage.recent.map((entry, i) => (
-                <div className="usage-row" key={i}>
-                  <span>{new Date(entry.createdAt).toLocaleString()}</span>
-                  <span>{entry.model}</span>
-                  <span>{(entry.inputTokens + entry.outputTokens + entry.cacheCreationInputTokens + entry.cacheReadInputTokens).toLocaleString()}</span>
-                  <span>${(entry.costCents / 100).toFixed(4)}</span>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-
-        <button className="link" onClick={() => setScreen("switcher")}>
-          Back
-        </button>
-      </div>
-    );
-  }
-
-  // screen === "switcher"
   return (
     <div className="app">
-      <h1>grouter Switcher</h1>
+      <div className="app-header">
+        <h1>grouter Switcher</h1>
+        <div className="account-row">
+          <span>{balance?.username ?? ""}</span>
+          <span>
+            {balance?.unlimited ? "Unlimited" : balance ? `$${((balance.balanceCents ?? 0) / 100).toFixed(2)} left` : "--"}
+          </span>
+        </div>
+      </div>
+
       {error && <div className="error">{error}</div>}
 
-      <div className="account-row">
-        <span>{balance?.username ?? ""}</span>
-        <span>
-          {balance?.unlimited ? "Unlimited" : balance ? `$${((balance.balanceCents ?? 0) / 100).toFixed(2)} left` : "--"}
-        </span>
+      <div className="tabs">
+        <button className={activeTab === "tools" ? "tab tab-active" : "tab"} onClick={() => openTab("tools")}>
+          Tools
+        </button>
+        <button className={activeTab === "usage" ? "tab tab-active" : "tab"} onClick={() => openTab("usage")}>
+          Usage
+        </button>
+        <button className={activeTab === "settings" ? "tab tab-active" : "tab"} onClick={() => openTab("settings")}>
+          Settings
+        </button>
       </div>
-      <button className="link" onClick={handleOpenUsage}>
-        View usage
-      </button>
 
-      <button onClick={handleVerify} disabled={verifying}>
-        {verifying ? "Verifying..." : "Verify key"}
-      </button>
-      {verifyResult && (
-        <p className="hint">
-          Key valid -- {verifyResult.anthropicModels.length} Anthropic models, {verifyResult.openAiModels.length} OpenAI
-          models
-        </p>
+      {activeTab === "tools" && (
+        <div className="tab-panel">
+          <div className="verify-row">
+            <button onClick={handleVerify} disabled={verifying}>
+              {verifying ? "Verifying..." : "Verify key"}
+            </button>
+            {verifyResult && (
+              <p className="hint">
+                Key valid -- {verifyResult.anthropicModels.length} Anthropic models, {verifyResult.openAiModels.length}{" "}
+                OpenAI models
+              </p>
+            )}
+          </div>
+
+          {showRestartReminder && (
+            <div className="hint">Restart Codex Desktop/CLI (or reload the IDE window) to pick up the GROUTER BYOK change.</div>
+          )}
+
+          {TOOLS.map((tool) => (
+            <ToolCard
+              key={tool.id}
+              id={tool.id}
+              label={tool.label}
+              description={tool.description}
+              install={installStatus?.[tool.id]}
+              status={status?.[tool.id]}
+              models={tool.modelKind === "anthropic" ? verifyResult?.anthropicModels ?? [] : verifyResult?.openAiModels ?? []}
+              selectedModel={tool.modelKind === "anthropic" ? anthropicModel : openAiModel}
+              onModelChange={(value) => void handleModelChange(tool.id, value)}
+              modelRequired={tool.id === "opencode"}
+              configurationOnly={tool.id === "codex"}
+              toggling={togglingTool === tool.id}
+              onModeChange={(mode) => void handleModeChange(tool.id, mode)}
+              onInstallOrUpdateFinished={() => void loadInstallStatus()}
+            />
+          ))}
+        </div>
       )}
 
-      <div className="tool-row">
-        <div className="tool-header">
-          <span>Claude Code</span>
-          <label className="switch">
-            <input
-              type="checkbox"
-              checked={status?.claude.enabled ?? false}
-              disabled={togglingClaude}
-              onChange={(e) => handleToggleClaude(e.target.checked)}
-            />
-            <span>{status?.claude.enabled ? "ON" : "OFF"}</span>
-          </label>
+      {activeTab === "usage" && (
+        <div className="tab-panel">
+          <div className="usage-range">
+            <button className={usageRange === "7d" ? "" : "link"} onClick={() => loadUsage("7d")} disabled={loadingUsage}>
+              7 days
+            </button>
+            <button className={usageRange === "30d" ? "" : "link"} onClick={() => loadUsage("30d")} disabled={loadingUsage}>
+              30 days
+            </button>
+          </div>
+
+          {loadingUsage && <p className="hint">Loading...</p>}
+
+          {usage && !loadingUsage && (
+            <>
+              <div className="usage-summary">
+                <div>
+                  <span className="usage-summary-value">{usage.requestCount}</span>
+                  <span className="usage-summary-label">requests</span>
+                </div>
+                <div>
+                  <span className="usage-summary-value">${(usage.costCents / 100).toFixed(2)}</span>
+                  <span className="usage-summary-label">spent</span>
+                </div>
+                <div>
+                  <span className="usage-summary-value">{totalTokens.toLocaleString()}</span>
+                  <span className="usage-summary-label">tokens</span>
+                </div>
+              </div>
+
+              <div className="usage-table">
+                <div className="usage-row usage-row-header">
+                  <span>When</span>
+                  <span>Model</span>
+                  <span>Tokens</span>
+                  <span>Cost</span>
+                </div>
+                {usage.recent.length === 0 && <p className="hint">No usage yet.</p>}
+                {usage.recent.map((entry, i) => (
+                  <div className="usage-row" key={i}>
+                    <span>{new Date(entry.createdAt).toLocaleString()}</span>
+                    <span>{entry.model}</span>
+                    <span>
+                      {(entry.inputTokens + entry.outputTokens + entry.cacheCreationInputTokens + entry.cacheReadInputTokens).toLocaleString()}
+                    </span>
+                    <span>${(entry.costCents / 100).toFixed(4)}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </div>
-        {status?.claude.drifted && <div className="drift-banner">Config drifted from what grouter last set -- re-toggle to re-apply.</div>}
-        <select value={anthropicModel} onChange={(e) => setAnthropicModel(e.target.value)}>
-          <option value="">(optional) default model</option>
-          {verifyResult?.anthropicModels.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.id}
-            </option>
-          ))}
-        </select>
-      </div>
+      )}
 
-      <div className="tool-row">
-        <div className="tool-header">
-          <span>Codex (CLI + desktop)</span>
-          <label className="switch">
-            <input
-              type="checkbox"
-              checked={status?.codex.enabled ?? false}
-              disabled={togglingCodex || !openAiModel}
-              onChange={(e) => handleToggleCodex(e.target.checked)}
-            />
-            <span>{status?.codex.enabled ? "ON" : "OFF"}</span>
-          </label>
-        </div>
-        {status?.codex.drifted && <div className="drift-banner">Config drifted from what grouter last set -- re-toggle to re-apply.</div>}
-        <select value={openAiModel} onChange={(e) => setOpenAiModel(e.target.value)}>
-          <option value="">Select a model (required)</option>
-          {verifyResult?.openAiModels.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.id}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {showRestartReminder && <div className="hint">Restart Claude Code / Codex (or reload the IDE window) to pick up the change.</div>}
-
-      <button className="link" onClick={() => setShowAdvanced(!showAdvanced)}>
-        {showAdvanced ? "Hide" : "Show"} Advanced
-      </button>
-      {showAdvanced && (
-        <div className="advanced">
+      {activeTab === "settings" && (
+        <div className="tab-panel">
           <label>
             Server URL
             <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
           </label>
-          <button onClick={handleSaveAdvanced}>Save</button>
+          <button onClick={handleSaveSettings}>Save</button>
           <div className="advanced-actions">
-            <button onClick={() => api.openConfigDir("claude")}>Open ~/.claude</button>
-            <button onClick={() => api.openConfigDir("codex")}>Open ~/.codex</button>
+            {TOOLS.map((tool) => (
+              <button key={tool.id} onClick={() => api.openConfigDir(tool.id)}>
+                Open {tool.label} config
+              </button>
+            ))}
           </div>
         </div>
       )}

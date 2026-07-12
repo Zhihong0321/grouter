@@ -5,8 +5,10 @@ mod codex;
 mod commands;
 mod config;
 mod error;
+mod opencode;
 mod paths;
 mod state;
+mod tools;
 mod verify;
 
 use state::AppState;
@@ -26,8 +28,12 @@ fn main() {
             commands::set_config,
             commands::toggle_claude,
             commands::toggle_codex,
+            commands::toggle_opencode,
             commands::detect_tools,
             commands::open_config_dir,
+            tools::detect_installations,
+            tools::install_tool,
+            tools::update_tool,
         ])
         .run(tauri::generate_context!())
         .expect("error while running grouter-switcher");

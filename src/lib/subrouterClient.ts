@@ -66,6 +66,18 @@ export interface SubRouterModelCatalog {
   groups: Record<string, string[]>;
 }
 
+export interface SubRouterModelPrice {
+  model: string;
+  provider: string;
+  inputPricePerMillion: number;
+  outputPricePerMillion: number;
+  currency: string;
+}
+
+export interface SubRouterPricingCatalog {
+  models: SubRouterModelPrice[];
+}
+
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -279,6 +291,34 @@ export class SubRouterClient {
       throw new SubRouterError("invalid_response", "SubRouter returned no model groups");
     }
     return { groups };
+  }
+
+  async listPricing(): Promise<SubRouterPricingCatalog> {
+    const result = await this.get("/api/models/pricing");
+    if (!isRecord(result.data) || !Array.isArray(result.data.models)) {
+      throw new SubRouterError("invalid_response", "SubRouter pricing response was invalid");
+    }
+
+    const models: SubRouterModelPrice[] = [];
+    for (const item of result.data.models) {
+      if (!isRecord(item)) continue;
+      if (typeof item.model !== "string" || typeof item.provider !== "string") continue;
+
+      const inputPrice = typeof item.input === "number" ? item.input : Number(item.input);
+      const outputPrice = typeof item.output === "number" ? item.output : Number(item.output);
+
+      if (isNaN(inputPrice) || isNaN(outputPrice)) continue;
+
+      models.push({
+        model: String(item.model),
+        provider: String(item.provider),
+        inputPricePerMillion: inputPrice,
+        outputPricePerMillion: outputPrice,
+        currency: typeof item.currency === "string" ? item.currency : "USD",
+      });
+    }
+
+    return { models };
   }
 
   async probeConnection(): Promise<SubRouterConnectionProbe> {

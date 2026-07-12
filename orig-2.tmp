@@ -32,6 +32,9 @@ export interface ApiKeyDto {
   budgetCents: number;
   spentCents: number;
   modelRestrictions: string[] | null;
+  /** Smart Routing Mode -- per-key, per-client opt-in. Not the provider-failover "smart routing" on the Router page. */
+  smartRoutingClaudeCode: boolean;
+  smartRoutingCodex: boolean;
   createdAt: string;
   revokedAt: string | null;
 }
@@ -225,7 +228,6 @@ export interface SmartRouteDto {
   providerName: string;
   priority: number;
   active: boolean;
-  providerActive: boolean;
   upstreamModelId: string;
   keyLast4: string | null;
   smokeHistory: { ok: boolean; latencyMs: number; message: string; testedAt: string }[];
@@ -337,11 +339,11 @@ export const api = {
 
   listKeys: () => request<ApiKeyDto[]>("/keys"),
   getKey: (id: string) => request<ApiKeyDto>(`/keys/${id}`),
-  createKey: (body: { name: string; rateLimitRpm?: number; budgetCents?: number; modelRestrictions?: string[] | null }) =>
+  createKey: (body: { name: string; rateLimitRpm?: number; budgetCents?: number; modelRestrictions?: string[] | null; smartRoutingClaudeCode?: boolean; smartRoutingCodex?: boolean }) =>
     request<ApiKeyDto>("/keys", { method: "POST", body: JSON.stringify(body) }),
   updateKey: (
     id: string,
-    body: Partial<{ name: string; rateLimitRpm: number; budgetCents: number; modelRestrictions: string[] | null }>,
+    body: Partial<{ name: string; rateLimitRpm: number; budgetCents: number; modelRestrictions: string[] | null; smartRoutingClaudeCode: boolean; smartRoutingCodex: boolean }>,
   ) => request<ApiKeyDto>(`/keys/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   revokeKey: (id: string) => request<ApiKeyDto>(`/keys/${id}/revoke`, { method: "POST" }),
   removeKey: (id: string) => request<void>(`/keys/${id}`, { method: "DELETE" }),

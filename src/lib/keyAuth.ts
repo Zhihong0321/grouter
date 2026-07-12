@@ -41,10 +41,6 @@ function rowToRecord(row: any): ApiKeyRecord {
     spentCents: Number(row.spent_cents),
     modelRestrictions: row.model_restrictions,
     unlimited: row.unlimited,
-    smartRouting: {
-      claudeCode: row.smart_routing_claude_code,
-      codex: row.smart_routing_codex,
-    },
   };
 }
 

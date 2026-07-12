@@ -68,7 +68,7 @@ pub fn apply(base_url: &str, key: &str, model: Option<&str>) -> Result<ToolState
     }
 
     write_settings(&root)?;
-    Ok(ToolState { enabled: true, snapshot })
+    Ok(ToolState { enabled: true, smart: false, snapshot })
 }
 
 /// Replays a snapshot captured by `apply`, restoring or removing each key.

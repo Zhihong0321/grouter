@@ -3,10 +3,7 @@ import { env } from "../../config/env.js";
 import { SubRouterClient, SubRouterError } from "../../lib/subrouterClient.js";
 import { SupplierKeySyncError, syncAllSupplierKeys, syncAvailableModelsFromSupplierKeys } from "../../lib/supplierKeySync.js";
 import { SupplierSyncError, syncAllSupplierActivity } from "../../lib/supplierSync.js";
-import { SupplierPriceSyncError, syncPricingFromSupplier } from "../../lib/supplierPriceSync.js";
 import { syncSmartRoutes } from "../../lib/smartRouting.js";
-import { decryptKey } from "../../lib/keyCrypto.js";
-import { checkProviderModel } from "../../lib/upstream.js";
 import { requireAdmin } from "./auth.js";
 
 function syncStateDto(row: Record<string, unknown> | undefined) {
@@ -46,18 +43,6 @@ function keySyncStateDto(row: Record<string, unknown> | undefined) {
     lastModelSyncErrorType: row.last_model_sync_error_type,
     lastModelSyncError: row.last_model_sync_error,
     lastAvailableModelCount: Number(row.last_available_model_count ?? 0),
-  };
-}
-
-function priceSyncStateDto(row: Record<string, unknown> | undefined) {
-  if (!row) return null;
-  return {
-    supplier: row.supplier,
-    lastAttemptAt: row.last_attempt_at,
-    lastSuccessAt: row.last_success_at,
-    lastSyncedModelCount: Number(row.last_synced_model_count ?? 0),
-    lastErrorType: row.last_error_type,
-    lastError: row.last_error,
   };
 }
 
@@ -305,25 +290,13 @@ const supplierSyncRoutes: FastifyPluginAsync = async (app) => {
       `SELECT m.model_id, m.brand, m.standard, m.display_name, m.active,
               COALESCE(json_agg(json_build_object(
                 'routeId', r.id, 'providerId', p.id, 'providerName', p.name,
-                'priority', r.priority, 'active', r.active AND p.active, 'providerActive', p.active,
-                'upstreamModelId', r.upstream_model_id, 'keyLast4', k.key_last4,
-                'smokeHistory', COALESCE((
-                  SELECT json_agg(json_build_object(
-                    'ok', smoke.ok, 'latencyMs', smoke.latency_ms,
-                    'message', smoke.message, 'testedAt', smoke.tested_at
-                  ) ORDER BY smoke.tested_at DESC, smoke.id DESC)
-                  FROM (
-                    SELECT id, ok, latency_ms, message, tested_at
-                    FROM reseller_route_smoke_tests
-                    WHERE model_id = r.model_id AND provider_id = r.provider_id
-                    ORDER BY tested_at DESC, id DESC LIMIT 5
-                  ) smoke
-                ), '[]'::json)
+                'priority', r.priority, 'active', r.active AND p.active,
+                'upstreamModelId', r.upstream_model_id, 'keyLast4', k.key_last4
               ) ORDER BY r.priority) FILTER (WHERE r.id IS NOT NULL), '[]'::json) AS routes
        FROM reseller_models m
        LEFT JOIN reseller_model_routes r ON r.model_id = m.model_id
        LEFT JOIN reseller_providers p ON p.id = r.provider_id
-       LEFT JOIN reseller_supplier_keys k ON k.provider_id = p.id OR k.anthropic_provider_id = p.id
+       LEFT JOIN reseller_supplier_keys k ON k.provider_id = p.id
        GROUP BY m.model_id
        ORDER BY m.brand, m.model_id`,
     );
@@ -335,87 +308,6 @@ const supplierSyncRoutes: FastifyPluginAsync = async (app) => {
       active: row.active,
       routes: row.routes,
     }));
-  });
-
-  // A deliberately bounded bulk check for the dashboard. Each test performs
-  // a real minimal request, so three run in parallel to keep it reasonably
-  // quick without overwhelming the supplier or consuming a burst of quota.
-  app.post("/admin/api/smart-routing/smoke-test-all", { preHandler: requireAdmin }, async (_request, reply) => {
-    const lock = await app.pg.connect();
-    let lockAcquired = false;
-    try {
-      const result = await lock.query<{ acquired: boolean }>("SELECT pg_try_advisory_lock(hashtext($1)) AS acquired", ["reseller_route_smoke_test_all"]);
-      lockAcquired = result.rows[0]?.acquired === true;
-      if (!lockAcquired) return reply.code(409).send({ error: "A quick smoke test is already running" });
-
-      const { rows: targets } = await app.pg.query<{
-        model_id: string; provider_id: string; standard: "anthropic" | "openai"; base_url: string; api_key_encrypted: string; upstream_model_id: string;
-      }>(
-        `SELECT r.model_id, r.provider_id, p.standard, p.base_url, p.api_key_encrypted, r.upstream_model_id
-         FROM reseller_model_routes r
-         JOIN reseller_models m ON m.model_id = r.model_id
-         JOIN reseller_providers p ON p.id = r.provider_id
-         WHERE r.active = true AND m.active = true AND p.active = true
-         ORDER BY r.model_id, r.priority`,
-      );
-
-      let next = 0;
-      let passed = 0;
-      let failed = 0;
-      const runOne = async () => {
-        for (;;) {
-          const target = targets[next++];
-          if (!target) return;
-          const startedAt = Date.now();
-          let ok = false;
-          let latencyMs = 0;
-          let statusCode: number | undefined;
-          let message = "Unknown error";
-          try {
-            const check = await checkProviderModel(
-              { standard: target.standard, baseUrl: target.base_url, apiKey: decryptKey(target.api_key_encrypted) },
-              target.upstream_model_id,
-            );
-            // Some OpenAI-compatible suppliers expose only one of the two
-            // OpenAI endpoints. A route is useful when at least one endpoint
-            // accepts the model; show the individual endpoint detail in its
-            // message instead of marking a working key dead.
-            ok = check.results.some((item) => item.ok);
-            latencyMs = Math.max(...check.results.map((item) => item.latencyMs));
-            const failedEndpoint = check.results.find((item) => !item.ok);
-            statusCode = failedEndpoint?.statusCode ?? check.results[0]?.statusCode;
-            message = ok
-              ? (failedEndpoint ? `Partial: ${failedEndpoint.endpoint} unavailable` : "OK")
-              : failedEndpoint?.message ?? "All test endpoints failed";
-          } catch (error) {
-            latencyMs = Date.now() - startedAt;
-            message = error instanceof Error ? error.message : "Smoke test failed";
-          }
-
-          await app.pg.query(
-            `INSERT INTO reseller_route_smoke_tests (model_id, provider_id, standard, ok, latency_ms, status_code, message)
-             VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-            [target.model_id, target.provider_id, target.standard, ok, latencyMs, statusCode ?? null, message],
-          );
-          await app.pg.query(
-            `DELETE FROM reseller_route_smoke_tests
-             WHERE model_id = $1 AND provider_id = $2 AND id NOT IN (
-               SELECT id FROM reseller_route_smoke_tests
-               WHERE model_id = $1 AND provider_id = $2
-               ORDER BY tested_at DESC, id DESC LIMIT 5
-             )`,
-            [target.model_id, target.provider_id],
-          );
-          if (ok) passed += 1;
-          else failed += 1;
-        }
-      };
-      await Promise.all(Array.from({ length: Math.min(3, targets.length) }, runOne));
-      return { tested: targets.length, passed, failed };
-    } finally {
-      if (lockAcquired) await lock.query("SELECT pg_advisory_unlock(hashtext($1))", ["reseller_route_smoke_test_all"]).catch(() => undefined);
-      lock.release();
-    }
   });
 
   app.post("/admin/api/supplier-sync/activity", { preHandler: requireAdmin }, async (_request, reply) => {
@@ -442,53 +334,6 @@ const supplierSyncRoutes: FastifyPluginAsync = async (app) => {
         synchronized: false,
         errorType: known ? error.type : "unknown",
         error: known ? error.message : "SubRouter activity synchronization failed",
-      });
-    }
-  });
-
-  // Sync pricing from SubRouter's pricing API
-  app.get("/admin/api/supplier-sync/pricing", { preHandler: requireAdmin }, async () => {
-    const { rows } = await app.pg.query(
-      "SELECT * FROM reseller_supplier_price_sync_state WHERE supplier = $1",
-      ["subrouter"],
-    );
-    return {
-      supplier: "subrouter",
-      sync: priceSyncStateDto(rows[0]),
-    };
-  });
-
-  app.post("/admin/api/supplier-sync/pricing", { preHandler: requireAdmin }, async (_request, reply) => {
-    if (!env.SUBROUTER_SESSION || !env.SUBROUTER_USER_ID) {
-      return reply.code(503).send({
-        supplier: "subrouter",
-        synchronized: false,
-        errorType: "not_configured",
-        error: "SubRouter credentials are not configured",
-      });
-    }
-
-    const client = new SubRouterClient({
-      baseUrl: env.SUBROUTER_BASE_URL,
-      session: env.SUBROUTER_SESSION,
-      userId: env.SUBROUTER_USER_ID,
-      timeoutMs: env.SUBROUTER_SYNC_REQUEST_TIMEOUT_MS,
-    });
-
-    try {
-      const result = await syncPricingFromSupplier({
-        pg: app.pg,
-        client,
-      });
-      app.priceCache.invalidate();
-      return { synchronized: true, ...result };
-    } catch (error) {
-      const known = error instanceof SubRouterError || error instanceof SupplierPriceSyncError;
-      return reply.code(error instanceof SupplierPriceSyncError && error.type === "already_running" ? 409 : 502).send({
-        supplier: "subrouter",
-        synchronized: false,
-        errorType: known ? error.type : "unknown",
-        error: known ? error.message : "SubRouter pricing synchronization failed",
       });
     }
   });

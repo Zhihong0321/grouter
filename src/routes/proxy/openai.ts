@@ -53,8 +53,12 @@ async function handleOpenAiRequest(app: Parameters<FastifyPluginAsync>[0], reque
   // Smart Routing Mode: swap in a cheaper tier when the request clears the
   // quality bar for it. Not to be confused with src/lib/smartRouting.ts
   // (provider failover matrix sync) -- see smart_routing_buildplan.md.
+  // Always on -- no per-key opt-in, and no client-type restriction (Codex,
+  // OpenCode, and any other OpenAI-compatible caller all qualify). The global
+  // kill switch is the tier_routing_mode admin setting ("smart" vs
+  // "honor_tier"), not a per-key/per-client flag; see admin/tierRouting.ts.
   const client = detectClient(request.headers, endpoint);
-  const smartRoutingEnabled = client === "codex" && keyRecord.smartRouting.codex;
+  const smartRoutingEnabled = true;
   let model = requestedModel;
   let decision: RoutingDecision | undefined;
   let tierConfig: TierConfig | undefined;

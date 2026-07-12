@@ -16,6 +16,10 @@ pub struct SnapshotValue {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ToolState {
     pub enabled: bool,
+    /// True when this tool is pointed at grouter's dynamic tier router
+    /// (Grouter Smart-Router) rather than a single pinned model (Grouter).
+    #[serde(default)]
+    pub smart: bool,
     #[serde(default)]
     pub snapshot: HashMap<String, SnapshotValue>,
 }
@@ -36,6 +40,8 @@ pub struct StateFile {
     pub selected_openai_model: Option<String>,
     pub claude: ToolState,
     pub codex: ToolState,
+    #[serde(default)]
+    pub opencode: ToolState,
 }
 
 impl Default for StateFile {
@@ -48,6 +54,7 @@ impl Default for StateFile {
             selected_openai_model: None,
             claude: ToolState::default(),
             codex: ToolState::default(),
+            opencode: ToolState::default(),
         }
     }
 }

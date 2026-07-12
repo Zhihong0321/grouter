@@ -52,8 +52,11 @@ const proxyRoutes: FastifyPluginAsync = async (app) => {
     // Smart Routing Mode: swap in a cheaper tier when the request clears the
     // quality bar for it. Not to be confused with src/lib/smartRouting.ts
     // (provider failover matrix sync) -- see smart_routing_buildplan.md.
+    // Always on -- no per-key opt-in. The global kill switch is the
+    // tier_routing_mode admin setting ("smart" vs "honor_tier"), not a per-key
+    // flag; see src/routes/admin/tierRouting.ts.
     const client = detectClient(request.headers, "messages");
-    const smartRoutingEnabled = client === "claude_code" && keyRecord.smartRouting.claudeCode;
+    const smartRoutingEnabled = true;
     let model = requestedModel;
     let decision: RoutingDecision | undefined;
     let tierConfig: TierConfig | undefined;

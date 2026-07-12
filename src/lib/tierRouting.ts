@@ -1,8 +1,11 @@
 import type { Signals, Tier, TierModelMap } from "./tierSignals.js";
 
 export interface TierConfig {
-  /** tier -> concrete model_id, e.g. { brain: "claude-opus-4-8", ... } */
-  tiers: TierModelMap;
+  /** Per-standard tier -> concrete model_id maps. Each handler uses its own standard's map. */
+  tiers: {
+    anthropic: TierModelMap;
+    openai: TierModelMap;
+  };
   /** Above this many (estimated) input tokens, always route to brain. */
   longContextTokens: number;
   /** Below this many input tokens with no tools, downgrade to routine. */
@@ -16,6 +19,10 @@ export interface TierConfig {
    * Off by default: thinking/long-context/short-turn signals still decide,
    * same as any other requested tier. */
   honorExplicitRoutine: boolean;
+  /** Small-fast model name for Claude Code background slot. */
+  smallFastModelName: string;
+  /** When true, route unknown OpenAI-compatible clients on chat/completions. */
+  routeUnknownOpenai: boolean;
 }
 
 export type RuleId =
@@ -47,17 +54,37 @@ export interface RoutingDecision {
  * chosen tier's model actually has an active route (and isn't blocked by the
  * key's model restrictions) before using it -- see `fallbackDecision` below
  * and its use in messages.ts / openai.ts.
+ *
+ * @param sig - Extracted signals from the request
+ * @param tiers - The tier map for this request's standard (anthropic or openai)
+ * @param cfg - Config options (mode, thresholds, etc.)
+ * @param requestedModel - The actual model string the client sent (for wasOverridden)
  */
-export function decideTier(sig: Signals, cfg: TierConfig): RoutingDecision {
+export function decideTier(
+  sig: Signals,
+  tiers: TierModelMap,
+  cfg: { mode: "smart" | "honor_tier"; longContextTokens: number; shortTurnTokens: number; honorExplicitRoutine: boolean },
+  requestedModel: string,
+): RoutingDecision {
   const finish = (chosenTier: Tier, ruleId: RuleId): RoutingDecision => ({
-    chosenModel: cfg.tiers[chosenTier],
+    chosenModel: tiers[chosenTier],
     chosenTier,
     requestedTier: sig.requestedTier,
     ruleId,
-    wasOverridden: cfg.tiers[chosenTier] !== cfg.tiers[sig.requestedTier],
+    wasOverridden: tiers[chosenTier] !== requestedModel,
   });
 
-  if (cfg.mode === "honor_tier") return finish(sig.requestedTier, "honor_tier");
+  // honor_tier mode: return the exact requested model (true off-switch)
+  if (cfg.mode === "honor_tier") {
+    return {
+      chosenModel: requestedModel,
+      chosenTier: sig.requestedTier,
+      requestedTier: sig.requestedTier,
+      ruleId: "honor_tier",
+      wasOverridden: false,
+    };
+  }
+
   if (sig.isBackground) return finish("routine", "background");
   if (sig.thinkingEnabled) return finish("brain", "thinking");
   if (sig.inputTokens > cfg.longContextTokens) return finish("brain", "long_context");

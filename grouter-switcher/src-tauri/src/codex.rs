@@ -7,6 +7,8 @@ use crate::paths::codex_config_path;
 use crate::state::{SnapshotValue, ToolState};
 
 const TOP_KEYS: [&str; 2] = ["model_provider", "model"];
+const PROVIDER_ID: &str = "grouter";
+const PROVIDER_NAME: &str = "GROUTER API (BYOK)";
 
 fn read_doc() -> Result<DocumentMut, AppError> {
     let path = codex_config_path();
@@ -34,28 +36,55 @@ fn backup_path() -> std::path::PathBuf {
 }
 
 fn normalized_base_url(base_url: &str) -> String {
-    format!("{}/v1", base_url.trim_end_matches('/'))
+    let trimmed = base_url.trim_end_matches('/');
+    if trimmed.ends_with("/v1") {
+        trimmed.to_string()
+    } else {
+        format!("{trimmed}/v1")
+    }
 }
 
 /// Sets model_provider/model + the [model_providers.grouter] table, snapshotting
 /// whatever top-level model_provider/model existed before (e.g. a different
 /// custom provider the user already had configured).
 pub fn apply(base_url: &str, key: &str, model: &str) -> Result<ToolState, AppError> {
-    let mut doc = read_doc()?;
-    fs::write(backup_path(), doc.to_string()).map_err(|e| AppError::Io(e.to_string()))?;
+    apply_with_snapshot(base_url, key, model, None)
+}
 
-    let mut snapshot: HashMap<String, SnapshotValue> = HashMap::new();
-    for k in TOP_KEYS {
-        let existed = doc.contains_key(k);
-        let value = doc.get(k).and_then(|item| item.as_str()).map(|s| s.to_string());
-        snapshot.insert(k.to_string(), SnapshotValue { existed, value });
+/// Re-applies the GROUTER provider without replacing the original snapshot. This
+/// is used when the user changes the default model while the switch is already on.
+pub fn apply_with_snapshot(
+    base_url: &str,
+    key: &str,
+    model: &str,
+    existing_snapshot: Option<&HashMap<String, SnapshotValue>>,
+) -> Result<ToolState, AppError> {
+    let mut doc = read_doc()?;
+
+    // Keep the first backup/snapshot as the restore point. Re-applying after a
+    // model change must not snapshot our own GROUTER config as the "official" one.
+    if existing_snapshot.is_none() {
+        fs::write(backup_path(), doc.to_string()).map_err(|e| AppError::Io(e.to_string()))?;
     }
 
-    doc["model_provider"] = value("grouter");
+    let snapshot = match existing_snapshot {
+        Some(snapshot) => snapshot.clone(),
+        None => {
+            let mut snapshot = HashMap::new();
+            for k in TOP_KEYS {
+                let existed = doc.contains_key(k);
+                let value = doc.get(k).and_then(|item| item.as_str()).map(|s| s.to_string());
+                snapshot.insert(k.to_string(), SnapshotValue { existed, value });
+            }
+            snapshot
+        }
+    };
+
+    doc["model_provider"] = value(PROVIDER_ID);
     doc["model"] = value(model);
 
     let mut provider = Table::new();
-    provider.insert("name", value("grouter"));
+    provider.insert("name", value(PROVIDER_NAME));
     provider.insert("base_url", value(normalized_base_url(base_url)));
     provider.insert("wire_api", value("responses"));
     provider.insert("requires_openai_auth", value(false));
@@ -68,10 +97,10 @@ pub fn apply(base_url: &str, key: &str, model: &str) -> Result<ToolState, AppErr
     let providers_table = providers_item
         .as_table_mut()
         .ok_or_else(|| AppError::ParseFailed("`model_providers` in config.toml is not a table".to_string()))?;
-    providers_table.insert("grouter", Item::Table(provider));
+    providers_table.insert(PROVIDER_ID, Item::Table(provider));
 
     write_doc(&doc)?;
-    Ok(ToolState { enabled: true, snapshot })
+    Ok(ToolState { enabled: true, smart: false, snapshot })
 }
 
 /// Removes [model_providers.grouter] and replays the snapshot for the
@@ -80,7 +109,7 @@ pub fn restore(tool_state: &ToolState) -> Result<(), AppError> {
     let mut doc = read_doc()?;
 
     if let Some(providers) = doc.get_mut("model_providers").and_then(|i| i.as_table_mut()) {
-        providers.remove("grouter");
+        providers.remove(PROVIDER_ID);
     }
 
     for k in TOP_KEYS {
@@ -106,10 +135,10 @@ pub fn is_drifted(tool_state: &ToolState, base_url: &str, key: &str) -> bool {
         Ok(d) => d,
         Err(_) => return true,
     };
-    if doc.get("model_provider").and_then(|i| i.as_str()) != Some("grouter") {
+    if doc.get("model_provider").and_then(|i| i.as_str()) != Some(PROVIDER_ID) {
         return true;
     }
-    let grouter = match doc.get("model_providers").and_then(|i| i.get("grouter")) {
+    let grouter = match doc.get("model_providers").and_then(|i| i.get(PROVIDER_ID)) {
         Some(g) => g,
         None => return true,
     };
@@ -134,6 +163,14 @@ mod tests {
     }
 
     #[test]
+    fn base_url_normalization_accepts_root_and_versioned_urls() {
+        assert_eq!(normalized_base_url("https://grouter.example"), "https://grouter.example/v1");
+        assert_eq!(normalized_base_url("https://grouter.example/"), "https://grouter.example/v1");
+        assert_eq!(normalized_base_url("https://grouter.example/v1"), "https://grouter.example/v1");
+        assert_eq!(normalized_base_url("https://grouter.example/v1/"), "https://grouter.example/v1");
+    }
+
+    #[test]
     fn apply_on_fresh_dir_writes_provider_table() {
         let dir = sandbox("codex-fresh");
         let state = apply("https://grouter.example/", "sk-test-key", "gpt-5.4").unwrap();
@@ -145,7 +182,7 @@ mod tests {
         let doc: DocumentMut = written.parse().unwrap();
         assert_eq!(doc["model_provider"].as_str(), Some("grouter"));
         assert_eq!(doc["model"].as_str(), Some("gpt-5.4"));
-        assert_eq!(doc["model_providers"]["grouter"]["name"].as_str(), Some("grouter"));
+        assert_eq!(doc["model_providers"]["grouter"]["name"].as_str(), Some(PROVIDER_NAME));
         // trailing slash on the input base_url must be normalized before /v1 is appended
         assert_eq!(doc["model_providers"]["grouter"]["base_url"].as_str(), Some("https://grouter.example/v1"));
         assert_eq!(doc["model_providers"]["grouter"]["wire_api"].as_str(), Some("responses"));
@@ -181,6 +218,32 @@ mod tests {
         assert_eq!(doc["model_provider"].as_str(), Some("openai"));
         assert_eq!(doc["model"].as_str(), Some("gpt-5"));
         assert_eq!(doc["model_providers"]["openai"]["base_url"].as_str(), Some("https://api.openai.com/v1"));
+        assert!(doc.get("model_providers").unwrap().get("grouter").is_none());
+    }
+
+    #[test]
+    fn reapply_preserves_original_snapshot_for_restore() {
+        let dir = sandbox("codex-reapply");
+        fs::write(
+            dir.join("config.toml"),
+            "model_provider = \"openai\"\nmodel = \"gpt-5\"\n",
+        )
+        .unwrap();
+
+        let initial = apply("https://grouter.example", "sk-test-key", "gpt-5.6-sol").unwrap();
+        let reapplied = apply_with_snapshot(
+            "https://grouter.example",
+            "sk-test-key",
+            "gpt-5.6-terra",
+            Some(&initial.snapshot),
+        )
+        .unwrap();
+        restore(&reapplied).unwrap();
+
+        let restored = fs::read_to_string(dir.join("config.toml")).unwrap();
+        let doc: DocumentMut = restored.parse().unwrap();
+        assert_eq!(doc["model_provider"].as_str(), Some("openai"));
+        assert_eq!(doc["model"].as_str(), Some("gpt-5"));
         assert!(doc.get("model_providers").unwrap().get("grouter").is_none());
     }
 

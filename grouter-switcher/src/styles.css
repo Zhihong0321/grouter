@@ -1,6 +1,20 @@
 :root {
   color-scheme: light;
   font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+  --border: #e2e2e7;
+  --border-strong: #d6d6dd;
+  --bg-subtle: #f7f7f9;
+  --text-muted: #64646c;
+  --accent: #4c6ef5;
+  --ok-bg: #eaf7ee;
+  --ok-fg: #1a7f37;
+  --ok-border: #b9e4c4;
+  --warn-bg: #fff4e5;
+  --warn-fg: #8a5a00;
+  --warn-border: #f3d08a;
+  --off-bg: #f1f1f4;
+  --off-fg: #66666f;
+  --off-border: #dcdce2;
 }
 
 * {
@@ -9,14 +23,14 @@
 
 body {
   margin: 0;
-  background: #f7f7f8;
+  background: var(--bg-subtle);
   color: #1a1a1a;
 }
 
 .app {
-  width: 480px;
-  min-height: 620px;
-  padding: 20px 24px;
+  width: 560px;
+  min-height: 720px;
+  padding: 20px 24px 28px;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -27,9 +41,18 @@ body {
   justify-content: center;
 }
 
+.app-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 h1 {
-  font-size: 18px;
-  margin: 0 0 8px;
+  font-size: 19px;
+  font-weight: 700;
+  margin: 0;
+  letter-spacing: -0.01em;
 }
 
 .form {
@@ -49,19 +72,28 @@ label {
 input,
 select {
   padding: 8px 10px;
-  border: 1px solid #d6d6d9;
+  border: 1px solid var(--border-strong);
   border-radius: 6px;
   font-size: 14px;
+  background: white;
+  font-family: inherit;
+}
+
+input:disabled,
+select:disabled {
+  background: var(--bg-subtle);
+  color: var(--text-muted);
 }
 
 button {
   padding: 8px 14px;
   border-radius: 6px;
-  border: 1px solid #d6d6d9;
+  border: 1px solid var(--border-strong);
   background: #1a1a1a;
   color: white;
   cursor: pointer;
   font-size: 14px;
+  font-family: inherit;
 }
 
 button:disabled {
@@ -72,7 +104,7 @@ button:disabled {
 button.link {
   background: none;
   border: none;
-  color: #4c6ef5;
+  color: var(--accent);
   text-align: left;
   padding: 4px 0;
   font-size: 13px;
@@ -80,7 +112,7 @@ button.link {
 
 .hint {
   font-size: 12px;
-  color: #666;
+  color: var(--text-muted);
   margin: 0;
 }
 
@@ -95,7 +127,7 @@ button.link {
 
 .recovery-password {
   display: block;
-  background: #f0f0f2;
+  background: var(--bg-subtle);
   border-radius: 6px;
   padding: 12px;
   font-size: 14px;
@@ -112,55 +144,151 @@ button.link {
 
 .account-row {
   display: flex;
-  justify-content: space-between;
-  font-size: 13px;
-  color: #444;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: right;
 }
 
-.tool-row {
-  border: 1px solid #e2e2e5;
-  border-radius: 8px;
-  padding: 12px;
+/* Tabs */
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tab {
+  background: none;
+  border: none;
+  border-radius: 6px 6px 0 0;
+  color: var(--text-muted);
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  position: relative;
+  top: 1px;
+}
+
+.tab-active {
+  color: #1a1a1a;
+  border-bottom: 2px solid var(--accent);
+}
+
+.tab-panel {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
+  padding-top: 4px;
 }
 
-.tool-header {
+.verify-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Tool cards */
+
+.tool-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: white;
+  box-shadow: 0 1px 2px rgba(16, 16, 20, 0.04);
+}
+
+.tool-card-head {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  font-weight: 600;
+  align-items: flex-start;
+  gap: 10px;
 }
 
-.switch {
+.tool-card-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.tool-card-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.tool-card-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: normal;
-  color: #666;
+  gap: 10px;
 }
 
-.drift-banner {
-  background: #fff4e5;
-  color: #8a5a00;
-  border: 1px solid #f3d08a;
-  border-radius: 6px;
-  padding: 6px 8px;
-  font-size: 12px;
-}
-
-.advanced {
-  border-top: 1px solid #e2e2e5;
+.tool-card-provider {
+  border-top: 1px solid var(--border);
   padding-top: 10px;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
+.pill {
+  display: inline-block;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+
+.pill-ok {
+  background: var(--ok-bg);
+  color: var(--ok-fg);
+  border-color: var(--ok-border);
+}
+
+.pill-warn {
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  border-color: var(--warn-border);
+}
+
+.pill-off {
+  background: var(--off-bg);
+  color: var(--off-fg);
+  border-color: var(--off-border);
+}
+
+.tool-log {
+  max-height: 160px;
+  overflow-y: auto;
+  background: #14141a;
+  color: #d7d7e0;
+  border-radius: 6px;
+  padding: 10px;
+  font-size: 11px;
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  white-space: pre-wrap;
+  margin: 0;
+}
+
+.drift-banner {
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  border: 1px solid var(--warn-border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
 .advanced-actions {
   display: flex;
+  flex-direction: column;
   gap: 8px;
 }
 
@@ -172,7 +300,7 @@ button.link {
 .usage-summary {
   display: flex;
   justify-content: space-between;
-  border: 1px solid #e2e2e5;
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 12px;
 }
@@ -191,11 +319,11 @@ button.link {
 
 .usage-summary-label {
   font-size: 11px;
-  color: #666;
+  color: var(--text-muted);
 }
 
 .usage-table {
-  border: 1px solid #e2e2e5;
+  border: 1px solid var(--border);
   border-radius: 8px;
   overflow: hidden;
   max-height: 300px;
@@ -208,7 +336,7 @@ button.link {
   gap: 6px;
   padding: 6px 10px;
   font-size: 12px;
-  border-bottom: 1px solid #f0f0f2;
+  border-bottom: 1px solid var(--bg-subtle);
 }
 
 .usage-row:last-child {
@@ -217,7 +345,7 @@ button.link {
 
 .usage-row-header {
   font-weight: 600;
-  background: #f7f7f8;
+  background: var(--bg-subtle);
   position: sticky;
   top: 0;
 }

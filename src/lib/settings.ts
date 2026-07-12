@@ -5,29 +5,45 @@ export const SETTINGS_KEYS = {
   KEY_PREFIX: "key_prefix",
   // Smart Routing Mode (tier-based model selection -- see src/lib/tierRouting.ts).
   // Not to be confused with the provider-failover "smart routing" sync (src/lib/smartRouting.ts).
+  // Legacy keys (now feed anthropic map for back-compat):
   TIER_MODEL_BRAIN: "tier_model_brain",
   TIER_MODEL_BUILD: "tier_model_build",
   TIER_MODEL_ROUTINE: "tier_model_routine",
+  // Per-standard tier maps:
+  TIER_MODEL_ANTHROPIC_BRAIN: "tier_model_anthropic_brain",
+  TIER_MODEL_ANTHROPIC_BUILD: "tier_model_anthropic_build",
+  TIER_MODEL_ANTHROPIC_ROUTINE: "tier_model_anthropic_routine",
+  TIER_MODEL_OPENAI_BRAIN: "tier_model_openai_brain",
+  TIER_MODEL_OPENAI_BUILD: "tier_model_openai_build",
+  TIER_MODEL_OPENAI_ROUTINE: "tier_model_openai_routine",
   TIER_LONG_CONTEXT_TOKENS: "tier_long_context_tokens",
   TIER_SHORT_TURN_TOKENS: "tier_short_turn_tokens",
   TIER_SMALL_FAST_MODEL: "tier_small_fast_model",
   TIER_ROUTING_MODE: "tier_routing_mode",
   TIER_HONOR_EXPLICIT_ROUTINE: "tier_honor_explicit_routine",
+  TIER_ROUTE_UNKNOWN_OPENAI: "tier_route_unknown_openai",
 } as const;
 
 const DEFAULT_TIER_CONFIG: TierConfig = {
   tiers: {
-    brain: "claude-opus-4-8",
-    build: "claude-sonnet-5",
-    routine: "claude-haiku-4-5",
+    anthropic: {
+      brain: "claude-opus-4-8",
+      build: "claude-sonnet-5",
+      routine: "claude-haiku-4-5",
+    },
+    openai: {
+      brain: "gpt-5",
+      build: "gpt-5",
+      routine: "gpt-5-mini",
+    },
   },
   longContextTokens: 60_000,
   shortTurnTokens: 1_500,
   mode: "smart",
   honorExplicitRoutine: false,
+  smallFastModelName: "claude-haiku-4-5",
+  routeUnknownOpenai: true,
 };
-
-const DEFAULT_SMALL_FAST_MODEL = "claude-haiku-4-5";
 
 /**
  * Runtime config the admin manages through the dashboard instead of Railway
@@ -73,22 +89,38 @@ export class SettingsCache {
   async getTierConfig(): Promise<TierConfig> {
     await this.ensureFresh();
     const mode = this.cache.get(SETTINGS_KEYS.TIER_ROUTING_MODE);
+
+    // Back-compat: legacy keys populate anthropic map if new keys unset
+    const anthropicBrain = this.cache.get(SETTINGS_KEYS.TIER_MODEL_ANTHROPIC_BRAIN)
+      ?? this.cache.get(SETTINGS_KEYS.TIER_MODEL_BRAIN)
+      ?? DEFAULT_TIER_CONFIG.tiers.anthropic.brain;
+    const anthropicBuild = this.cache.get(SETTINGS_KEYS.TIER_MODEL_ANTHROPIC_BUILD)
+      ?? this.cache.get(SETTINGS_KEYS.TIER_MODEL_BUILD)
+      ?? DEFAULT_TIER_CONFIG.tiers.anthropic.build;
+    const anthropicRoutine = this.cache.get(SETTINGS_KEYS.TIER_MODEL_ANTHROPIC_ROUTINE)
+      ?? this.cache.get(SETTINGS_KEYS.TIER_MODEL_ROUTINE)
+      ?? DEFAULT_TIER_CONFIG.tiers.anthropic.routine;
+
     return {
       tiers: {
-        brain: this.cache.get(SETTINGS_KEYS.TIER_MODEL_BRAIN) ?? DEFAULT_TIER_CONFIG.tiers.brain,
-        build: this.cache.get(SETTINGS_KEYS.TIER_MODEL_BUILD) ?? DEFAULT_TIER_CONFIG.tiers.build,
-        routine: this.cache.get(SETTINGS_KEYS.TIER_MODEL_ROUTINE) ?? DEFAULT_TIER_CONFIG.tiers.routine,
+        anthropic: {
+          brain: anthropicBrain,
+          build: anthropicBuild,
+          routine: anthropicRoutine,
+        },
+        openai: {
+          brain: this.cache.get(SETTINGS_KEYS.TIER_MODEL_OPENAI_BRAIN) ?? DEFAULT_TIER_CONFIG.tiers.openai.brain,
+          build: this.cache.get(SETTINGS_KEYS.TIER_MODEL_OPENAI_BUILD) ?? DEFAULT_TIER_CONFIG.tiers.openai.build,
+          routine: this.cache.get(SETTINGS_KEYS.TIER_MODEL_OPENAI_ROUTINE) ?? DEFAULT_TIER_CONFIG.tiers.openai.routine,
+        },
       },
       longContextTokens: Number(this.cache.get(SETTINGS_KEYS.TIER_LONG_CONTEXT_TOKENS) ?? DEFAULT_TIER_CONFIG.longContextTokens),
       shortTurnTokens: Number(this.cache.get(SETTINGS_KEYS.TIER_SHORT_TURN_TOKENS) ?? DEFAULT_TIER_CONFIG.shortTurnTokens),
       mode: mode === "honor_tier" ? "honor_tier" : "smart",
       honorExplicitRoutine: (this.cache.get(SETTINGS_KEYS.TIER_HONOR_EXPLICIT_ROUTINE) ?? String(DEFAULT_TIER_CONFIG.honorExplicitRoutine)) === "true",
+      smallFastModelName: this.cache.get(SETTINGS_KEYS.TIER_SMALL_FAST_MODEL) ?? DEFAULT_TIER_CONFIG.smallFastModelName,
+      routeUnknownOpenai: (this.cache.get(SETTINGS_KEYS.TIER_ROUTE_UNKNOWN_OPENAI) ?? String(DEFAULT_TIER_CONFIG.routeUnknownOpenai)) === "true",
     };
-  }
-
-  async getSmallFastModelName(): Promise<string> {
-    await this.ensureFresh();
-    return this.cache.get(SETTINGS_KEYS.TIER_SMALL_FAST_MODEL) ?? DEFAULT_SMALL_FAST_MODEL;
   }
 
   async set(pg: Pool, key: string, value: string): Promise<void> {

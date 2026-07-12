@@ -10,8 +10,6 @@ interface CreateKeyBody {
   rateLimitRpm?: number;
   budgetCents?: number;
   modelRestrictions?: string[] | null;
-  smartRoutingClaudeCode?: boolean;
-  smartRoutingCodex?: boolean;
 }
 
 interface UpdateKeyBody {
@@ -19,8 +17,6 @@ interface UpdateKeyBody {
   rateLimitRpm?: number;
   budgetCents?: number;
   modelRestrictions?: string[] | null;
-  smartRoutingClaudeCode?: boolean;
-  smartRoutingCodex?: boolean;
 }
 
 function rowToDto(row: any) {
@@ -34,8 +30,6 @@ function rowToDto(row: any) {
     budgetCents: Number(row.budget_cents),
     spentCents: Number(row.spent_cents),
     modelRestrictions: row.model_restrictions,
-    smartRoutingClaudeCode: row.smart_routing_claude_code,
-    smartRoutingCodex: row.smart_routing_codex,
     createdAt: row.created_at,
     revokedAt: row.revoked_at,
   };
@@ -45,14 +39,14 @@ const keysRoutes: FastifyPluginAsync = async (app) => {
   app.addHook("preHandler", requireAdmin);
 
   app.post<{ Body: CreateKeyBody }>("/admin/api/keys", async (request, reply) => {
-    const { name, rateLimitRpm = 60, budgetCents = 0, modelRestrictions = null, smartRoutingClaudeCode = false, smartRoutingCodex = false } = request.body;
+    const { name, rateLimitRpm = 60, budgetCents = 0, modelRestrictions = null } = request.body;
     const keyPrefix = await app.settingsCache.getKeyPrefix();
     const issued = issueKey(keyPrefix);
     const ciphertext = encryptKey(issued.plaintext);
 
     const { rows } = await app.pg.query(
-      `INSERT INTO reseller_api_keys (name, key_hash, key_prefix, key_ciphertext, rate_limit_rpm, budget_cents, model_restrictions, smart_routing_claude_code, smart_routing_codex)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      `INSERT INTO reseller_api_keys (name, key_hash, key_prefix, key_ciphertext, rate_limit_rpm, budget_cents, model_restrictions)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
       [
         name,
         issued.hash,
@@ -61,8 +55,6 @@ const keysRoutes: FastifyPluginAsync = async (app) => {
         rateLimitRpm,
         budgetCents,
         modelRestrictions ? JSON.stringify(modelRestrictions) : null,
-        smartRoutingClaudeCode,
-        smartRoutingCodex,
       ],
     );
 
@@ -90,15 +82,13 @@ const keysRoutes: FastifyPluginAsync = async (app) => {
       rateLimitRpm = current.rate_limit_rpm,
       budgetCents = current.budget_cents,
       modelRestrictions,
-      smartRoutingClaudeCode = current.smart_routing_claude_code,
-      smartRoutingCodex = current.smart_routing_codex,
     } = request.body;
     const restrictions = modelRestrictions === undefined ? current.model_restrictions : modelRestrictions;
 
     const { rows } = await app.pg.query(
-      `UPDATE reseller_api_keys SET name = $1, rate_limit_rpm = $2, budget_cents = $3, model_restrictions = $4, smart_routing_claude_code = $5, smart_routing_codex = $6
-       WHERE id = $7 RETURNING *`,
-      [name, rateLimitRpm, budgetCents, restrictions ? JSON.stringify(restrictions) : null, smartRoutingClaudeCode, smartRoutingCodex, request.params.id],
+      `UPDATE reseller_api_keys SET name = $1, rate_limit_rpm = $2, budget_cents = $3, model_restrictions = $4
+       WHERE id = $5 RETURNING *`,
+      [name, rateLimitRpm, budgetCents, restrictions ? JSON.stringify(restrictions) : null, request.params.id],
     );
 
     await invalidateKeyCache(app.redis, current.key_hash);
