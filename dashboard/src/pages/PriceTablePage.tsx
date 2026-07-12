@@ -1,14 +1,38 @@
-import { useEffect, useState } from "react";
-import { api, type ModelPriceDto, type SupplierModelCostDto, type SupplierPricingDto } from "../api/client.js";
+import { Fragment, useEffect, useState } from "react";
+import { api, type ModelPriceDto, type SupplierModelPricingDto, type SupplierPricingDto, type SupplierProviderCostDto } from "../api/client.js";
 
-// Supplier costs arrive in the supplier's own unit + currency (subrouter prices
-// most providers in CNY per some ratio unit, a few in USD). We deliberately do
-// NOT convert -- we show the raw number + currency so it always matches what the
-// subrouter.ai models page displays, and never implies a false precision.
-function fmtCost(value: number | null, currency: string | null): string {
+// Supplier costs arrive in the provider's own unit + currency (subrouter prices
+// most providers in CNY per its ratio unit, a few in USD). We do NOT convert --
+// we show the raw number + currency so it matches the subrouter.ai page exactly.
+function fmtCost(value: number | null): string {
   if (value == null) return "—";
-  const n = value < 1 ? value.toFixed(4) : value.toFixed(2);
-  return `${n} ${currency ?? ""}`.trim();
+  return value < 1 ? value.toFixed(4) : value.toFixed(2);
+}
+
+function ProviderRows({ providers }: { providers: SupplierProviderCostDto[] }) {
+  if (providers.length === 0) {
+    return <tr><td colSpan={7} style={{ color: "#9aa4b2", paddingLeft: 24 }}>No supplier providers synced for this model yet.</td></tr>;
+  }
+  return (
+    <>
+      {providers.map((p) => (
+        <tr key={p.providerGroup} style={{ background: p.matchesOurKey ? "rgba(126,231,135,0.08)" : undefined }}>
+          <td style={{ paddingLeft: 24, color: "#9aa4b2" }}>
+            {p.priceRank === 1 ? "▸ primary" : `backup ${p.priceRank}`}
+          </td>
+          <td>
+            {p.providerName ?? p.providerGroup}
+            {p.matchesOurKey && <span title="Matches one of your subrouter keys" style={{ color: "#7ee787" }}> ★ yours</span>}
+          </td>
+          <td style={{ color: "#9aa4b2" }}>{p.region ?? ""}</td>
+          <td>{fmtCost(p.inputPrice)}</td>
+          <td>{fmtCost(p.outputPrice)}</td>
+          <td>{fmtCost(p.cacheReadPrice)}</td>
+          <td style={{ color: "#9aa4b2" }}>{p.currency ?? ""}</td>
+        </tr>
+      ))}
+    </>
+  );
 }
 
 export default function PriceTablePage() {
@@ -17,12 +41,17 @@ export default function PriceTablePage() {
   const [syncing, setSyncing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
-  const load = () => Promise.all([api.listPrices(), api.getSupplierPricing()]).then(([p, sp]) => {
-    setPrices(p);
-    setPricing(sp);
-  });
-  useEffect(() => { load().catch((e) => setError(e.message)); }, []);
+  // Load the retail price table and the supplier-cost data INDEPENDENTLY. The
+  // supplier endpoint depends on tables from a later migration, so if it is
+  // unavailable it must never blank the whole page -- retail must still render.
+  const loadPrices = () => api.listPrices().then(setPrices);
+  const loadPricing = () => api.getSupplierPricing().then(setPricing).catch(() => setPricing(null));
+  useEffect(() => {
+    loadPrices().catch((e) => setError(e.message));
+    loadPricing();
+  }, []);
 
   const save = async (modelId: string, field: keyof ModelPriceDto, value: number) => {
     const updated = await api.updatePrice(modelId, { [field]: value } as any);
@@ -36,11 +65,11 @@ export default function PriceTablePage() {
     try {
       const result = await api.syncSupplierPricing();
       setMessage(
-        `Synced supplier cost for ${result.syncedModelCount} model(s): ` +
-        `${result.matchedCount} matched your key's provider group, ${result.fallbackCount} used cheapest-provider fallback.` +
-        (result.unpricedModelIds.length ? ` No supplier price found for: ${result.unpricedModelIds.join(", ")}.` : ""),
+        `Synced ${result.providerRowCount} provider price(s) across ${result.pricedModelCount} model(s). ` +
+        `${result.matchesOurKeyCount} match your keys.` +
+        (result.unpricedModelIds.length ? ` No supplier price for: ${result.unpricedModelIds.join(", ")}.` : ""),
       );
-      await load();
+      await loadPricing();
     } catch (e: any) {
       setError(e.message ?? "Sync failed");
     } finally {
@@ -48,8 +77,8 @@ export default function PriceTablePage() {
     }
   };
 
-  const costByModel = new Map<string, SupplierModelCostDto>();
-  for (const c of pricing?.costs ?? []) costByModel.set(c.modelId, c);
+  const modelByPricing = new Map<string, SupplierModelPricingDto>();
+  for (const m of pricing?.models ?? []) modelByPricing.set(m.modelId, m);
 
   return (
     <div>
@@ -57,23 +86,22 @@ export default function PriceTablePage() {
         <div style={{ flex: 1 }}>
           <h2>Price table</h2>
           <p style={{ color: "#9aa4b2", marginTop: 0 }}>
-            <strong>Retail</strong> columns (cents per million tokens) are what you charge customers — editable, applied to new
-            requests only. <strong>Supplier cost</strong> columns are read-only reference, pulled from subrouter.ai; a sync never
-            changes your retail price.
+            <strong>Retail</strong> (cents per million tokens) is what you charge customers — editable, applied to new requests
+            only. Expand a model to see <strong>every supplier provider</strong> (primary + all backups) and its cost from
+            subrouter.ai. A sync never changes your retail price.
           </p>
         </div>
         <button type="button" onClick={sync} disabled={syncing}>
-          {syncing ? "Syncing prices…" : "Sync supplier prices"}
+          {syncing ? "Syncing…" : "Sync supplier prices"}
         </button>
       </div>
 
       {error && <p style={{ color: "#ff8080" }}>{error}</p>}
       {message && <p style={{ color: "#7ee787" }}>{message}</p>}
-
       {pricing?.sync && (
         <p style={{ color: "#9aa4b2", fontSize: 13 }}>
           {pricing.sync.lastSuccessAt
-            ? `Last synced ${new Date(pricing.sync.lastSuccessAt).toLocaleString()} · ${pricing.sync.lastMatchedCount} matched, ${pricing.sync.lastFallbackCount} fallback`
+            ? `Last synced ${new Date(pricing.sync.lastSuccessAt).toLocaleString()} · ${pricing.sync.lastProviderRowCount} providers, ${pricing.sync.lastMatchesOurKeyCount} match your keys`
             : "Never synced."}
           {pricing.sync.lastError && <span style={{ color: "#ff8080" }}> · Last error: {pricing.sync.lastError}</span>}
         </p>
@@ -88,37 +116,54 @@ export default function PriceTablePage() {
             <th>Cache write</th>
             <th>Cache read</th>
             <th>Active</th>
-            <th style={{ borderLeft: "2px solid #2b3444" }}>Supplier in</th>
-            <th>Supplier out</th>
-            <th>Provider</th>
+            <th>Providers</th>
           </tr>
         </thead>
         <tbody>
           {prices.map((p) => {
-            const cost = costByModel.get(p.modelId);
+            const sup = modelByPricing.get(p.modelId);
+            const providerCount = sup?.providers.length ?? 0;
+            const isOpen = !!expanded[p.modelId];
             return (
-              <tr key={p.modelId}>
-                <td>{p.modelId}</td>
-                {(["inputPriceCentsPerMillion", "outputPriceCentsPerMillion", "cacheWritePriceCentsPerMillion", "cacheReadPriceCentsPerMillion"] as const).map((field) => (
-                  <td key={field}>
-                    <input
-                      type="number"
-                      defaultValue={p[field] as number}
-                      onBlur={(e) => save(p.modelId, field, Number(e.target.value))}
-                      style={{ width: 90 }}
-                    />
+              <Fragment key={p.modelId}>
+                <tr>
+                  <td>{p.modelId}</td>
+                  {(["inputPriceCentsPerMillion", "outputPriceCentsPerMillion", "cacheWritePriceCentsPerMillion", "cacheReadPriceCentsPerMillion"] as const).map((field) => (
+                    <td key={field}>
+                      <input
+                        type="number"
+                        defaultValue={p[field] as number}
+                        onBlur={(e) => save(p.modelId, field, Number(e.target.value))}
+                        style={{ width: 90 }}
+                      />
+                    </td>
+                  ))}
+                  <td>
+                    <input type="checkbox" defaultChecked={p.active} onChange={(e) => save(p.modelId, "active", e.target.checked as any)} />
                   </td>
-                ))}
-                <td>
-                  <input type="checkbox" defaultChecked={p.active} onChange={(e) => save(p.modelId, "active", e.target.checked as any)} />
-                </td>
-                <td style={{ borderLeft: "2px solid #2b3444", color: "#9aa4b2" }}>{fmtCost(cost?.costInputPrice ?? null, cost?.currency ?? null)}</td>
-                <td style={{ color: "#9aa4b2" }}>{fmtCost(cost?.costOutputPrice ?? null, cost?.currency ?? null)}</td>
-                <td style={{ color: "#9aa4b2", fontSize: 12 }}>
-                  {cost?.providerName ?? "—"}
-                  {cost?.isFallback && <span title="No key-group match; showing cheapest provider" style={{ color: "#d29922" }}> (fallback)</span>}
-                </td>
-              </tr>
+                  <td>
+                    {providerCount > 0 ? (
+                      <button type="button" className="secondary" onClick={() => setExpanded((prev) => ({ ...prev, [p.modelId]: !prev[p.modelId] }))}>
+                        {isOpen ? "Hide" : "Show"} {providerCount}
+                      </button>
+                    ) : <span style={{ color: "#9aa4b2" }}>—</span>}
+                  </td>
+                </tr>
+                {isOpen && (
+                  <>
+                    <tr style={{ fontSize: 12, color: "#9aa4b2" }}>
+                      <td style={{ paddingLeft: 24 }}>Route</td>
+                      <td>Provider</td>
+                      <td>Region</td>
+                      <td>In</td>
+                      <td>Out</td>
+                      <td>Cache read</td>
+                      <td>Currency</td>
+                    </tr>
+                    <ProviderRows providers={sup?.providers ?? []} />
+                  </>
+                )}
+              </Fragment>
             );
           })}
         </tbody>

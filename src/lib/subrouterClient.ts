@@ -79,6 +79,8 @@ export interface SubRouterProviderPrice {
   cacheReadPrice: number | null;
   cacheCreationPrice: number | null;
   currency: string;
+  /** e.g. "overseas" | "mainland_china"; null when SubRouter omits it. */
+  region: string | null;
 }
 
 export interface SubRouterModelPrice {
@@ -345,6 +347,7 @@ export class SubRouterClient {
             cacheReadPrice: optionalNumber(raw.cache_read_price),
             cacheCreationPrice: optionalNumber(raw.cache_creation_price),
             currency: typeof raw.price_currency === "string" ? raw.price_currency : "USD",
+            region: typeof raw.region === "string" ? raw.region : null,
           });
         }
       }

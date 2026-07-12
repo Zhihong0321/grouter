@@ -68,27 +68,35 @@ export interface ModelPriceDto {
   updatedAt: string;
 }
 
-export interface SupplierModelCostDto {
-  modelId: string;
-  displayName: string;
-  /** Our retail price (cents per million), from reseller_model_prices. */
-  retailInputCentsPerMillion: number | null;
-  retailOutputCentsPerMillion: number | null;
-  /** The subrouter provider group we matched, or null when we fell back. */
-  matchedGroup: string | null;
+/** One supplier provider's cost for a model (primary or a backup). */
+export interface SupplierProviderCostDto {
+  providerGroup: string;
   providerName: string | null;
-  /** True when no key group matched and we recorded the cheapest provider instead. */
-  isFallback: boolean | null;
-  /** Supplier cost, in the supplier's own unit + currency (unconverted). */
-  costInputPrice: number | null;
-  costOutputPrice: number | null;
-  costCacheReadPrice: number | null;
-  costCacheCreationPrice: number | null;
+  /** 1 = cheapest/primary, then backups in ascending price order. */
+  priceRank: number;
+  /** True when this provider matches one of our own subrouter keys. */
+  matchesOurKey: boolean;
+  /** Supplier cost in the provider's own unit + currency (unconverted). */
+  inputPrice: number | null;
+  outputPrice: number | null;
+  cacheReadPrice: number | null;
+  cacheCreationPrice: number | null;
   currency: string | null;
+  region: string | null;
   /** Vendor list price (e.g. Anthropic official $/M) for reference only. */
   officialInputPrice: number | null;
   officialOutputPrice: number | null;
-  lastSyncedAt: string | null;
+}
+
+export interface SupplierModelPricingDto {
+  modelId: string;
+  displayName: string;
+  brand: string;
+  /** Our retail price (cents per million), from reseller_model_prices. */
+  retailInputCentsPerMillion: number | null;
+  retailOutputCentsPerMillion: number | null;
+  /** Every supplier provider for this model, cheapest first. */
+  providers: SupplierProviderCostDto[];
 }
 
 export interface SupplierPricingDto {
@@ -96,22 +104,22 @@ export interface SupplierPricingDto {
   sync: {
     lastAttemptAt: string | null;
     lastSuccessAt: string | null;
-    lastSyncedModelCount: number;
-    lastMatchedCount: number;
-    lastFallbackCount: number;
+    lastPricedModelCount: number;
+    lastMatchesOurKeyCount: number;
+    lastProviderRowCount: number;
     lastErrorType: string | null;
     lastError: string | null;
   } | null;
-  costs: SupplierModelCostDto[];
+  models: SupplierModelPricingDto[];
 }
 
 export interface SupplierPriceSyncResultDto {
   synchronized: true;
   supplier: "subrouter";
   totalSupplierModels: number;
-  syncedModelCount: number;
-  matchedCount: number;
-  fallbackCount: number;
+  pricedModelCount: number;
+  providerRowCount: number;
+  matchesOurKeyCount: number;
   unpricedModelIds: string[];
   syncedAt: string;
 }
