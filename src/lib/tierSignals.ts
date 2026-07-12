@@ -83,15 +83,32 @@ export function signalsFromAnthropic(body: Record<string, unknown>, cfg: Anthrop
   const model = typeof body.model === "string" ? body.model : "";
   const thinking = body.thinking as { type?: string } | undefined;
   const messages = Array.isArray(body.messages) ? body.messages : [];
-  const system = typeof body.system === "string" ? body.system : JSON.stringify(body.system ?? "");
+  const system = typeof body.system === "string" ? body.system : "";
   const tools = Array.isArray(body.tools) ? body.tools : [];
+
+  // Extract text content from messages (not JSON structure)
+  let contentText = system;
+  for (const msg of messages) {
+    if (typeof msg === "object" && msg !== null) {
+      const content = (msg as Record<string, unknown>).content;
+      if (typeof content === "string") {
+        contentText += content;
+      } else if (Array.isArray(content)) {
+        for (const block of content) {
+          if (typeof block === "object" && block !== null && typeof (block as Record<string, unknown>).text === "string") {
+            contentText += (block as Record<string, unknown>).text;
+          }
+        }
+      }
+    }
+  }
 
   return {
     client: "claude_code",
     requestedTier: classifyRequestedTier(model, cfg.tiers),
     isBackground: model.length > 0 && model === cfg.smallFastModelName,
     thinkingEnabled: thinking?.type === "enabled",
-    inputTokens: estimateTokens(system + JSON.stringify(messages)),
+    inputTokens: estimateTokens(contentText),
     hasTools: tools.length > 0,
   };
 }
@@ -117,12 +134,36 @@ export function signalsFromOpenAI(
   const tools = Array.isArray(body.tools) ? body.tools : [];
   const content = endpoint === "responses" ? body.input : body.messages;
 
+  // Extract text content from messages/input (not JSON structure)
+  let contentText = "";
+  if (typeof content === "string") {
+    contentText = content;
+  } else if (Array.isArray(content)) {
+    for (const msg of content) {
+      if (typeof msg === "object" && msg !== null) {
+        const msgContent = (msg as Record<string, unknown>).content;
+        if (typeof msgContent === "string") {
+          contentText += msgContent;
+        } else if (Array.isArray(msgContent)) {
+          for (const block of msgContent) {
+            if (typeof block === "object" && block !== null) {
+              const text = (block as Record<string, unknown>).text;
+              if (typeof text === "string") {
+                contentText += text;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
   return {
     client: "codex",
     requestedTier: effort ? mapEffortToTier(effort) : classifyRequestedTier(model, cfg.tiers),
     isBackground: false,
     thinkingEnabled: effort === "high",
-    inputTokens: estimateTokens(JSON.stringify(content ?? "")),
+    inputTokens: estimateTokens(contentText),
     hasTools: tools.length > 0,
   };
 }
