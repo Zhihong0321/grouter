@@ -53,19 +53,19 @@ async function handleOpenAiRequest(app: Parameters<FastifyPluginAsync>[0], reque
   // Smart Routing Mode: swap in a cheaper tier when the request clears the
   // quality bar for it. Not to be confused with src/lib/smartRouting.ts
   // (provider failover matrix sync) -- see smart_routing_buildplan.md.
-  // Always on -- no per-key opt-in, and no client-type restriction (Codex,
-  // OpenCode, and any other OpenAI-compatible caller all qualify). The global
-  // kill switch is the tier_routing_mode admin setting ("smart" vs
-  // "honor_tier"), not a per-key/per-client flag; see admin/tierRouting.ts.
+  // Always on for Codex, and optionally for unknown OpenAI-compatible clients
+  // (controlled by tier_route_unknown_openai setting). The global kill switch
+  // is the tier_routing_mode admin setting ("smart" vs "honor_tier"), not a
+  // per-key/per-client flag; see admin/tierRouting.ts.
   const client = detectClient(request.headers, endpoint);
-  const smartRoutingEnabled = true;
+  const tierConfig = await app.settingsCache.getTierConfig();
+  const smartRoutingEnabled =
+    client === "codex" || (client === "unknown" && tierConfig.routeUnknownOpenai);
   let model = requestedModel;
   let decision: RoutingDecision | undefined;
-  let tierConfig: TierConfig | undefined;
   if (smartRoutingEnabled) {
-    tierConfig = await app.settingsCache.getTierConfig();
-    const sig = signalsFromOpenAI(body, endpoint, { tiers: tierConfig.tiers });
-    decision = decideTier(sig, tierConfig);
+    const sig = signalsFromOpenAI(body, endpoint, { tiers: tierConfig.tiers.openai });
+    decision = decideTier(sig, tierConfig.tiers.openai, tierConfig, requestedModel);
     if (decision.chosenModel !== requestedModel) {
       if (keyRecord.modelRestrictions && !keyRecord.modelRestrictions.includes(decision.chosenModel)) {
         decision = fallbackDecision(decision, requestedModel, "restricted_fallback");
@@ -144,8 +144,8 @@ async function handleOpenAiRequest(app: Parameters<FastifyPluginAsync>[0], reque
   const isStreaming = body.stream === true;
 
   const computeSavings = async (usage: CapturedUsage): Promise<{ costBaselineCents?: number; costSavedCents?: number }> => {
-    if (!decision?.wasOverridden || !tierConfig) return {};
-    const baselinePrice = await app.priceCache.get(tierConfig.tiers[decision.requestedTier]);
+    if (!decision?.wasOverridden) return {};
+    const baselinePrice = await app.priceCache.get(tierConfig.tiers.openai[decision.requestedTier]);
     if (!baselinePrice) return {};
     const costBaselineCents = computeCostCents(usage, baselinePrice).totalCostCents;
     const costSavedCents = Math.max(0, costBaselineCents - computeCostCents(usage, price).totalCostCents);
