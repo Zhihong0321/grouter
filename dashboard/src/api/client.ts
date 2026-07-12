@@ -228,6 +228,7 @@ export interface SmartRouteDto {
   providerName: string;
   priority: number;
   active: boolean;
+  providerActive: boolean;
   upstreamModelId: string;
   keyLast4: string | null;
   smokeHistory: { ok: boolean; latencyMs: number; message: string; testedAt: string }[];

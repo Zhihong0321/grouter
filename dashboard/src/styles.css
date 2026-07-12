@@ -36,7 +36,5 @@ button.danger { background: #c0392b; }
 .route-pair:last-child { border-bottom: 0; }
 .route-pair-actions { display: inline-flex; gap: 6px; margin: 6px 0; }
 .route-pair-actions button { padding: 5px 8px; font-size: 12px; }
-.model-status-row { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
-.model-status-row button { padding: 4px 8px; font-size: 12px; }
 .route-model-id { display: block; color: #9aa4b2; font-family: monospace; font-size: 11px; margin-top: 4px; }
 @media (max-width: 700px) { .smart-routing-header { align-items: flex-start; flex-direction: column; } .smart-routing-table { min-width: 680px; } .card { overflow-x: auto; } }
