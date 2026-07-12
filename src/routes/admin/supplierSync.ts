@@ -305,7 +305,7 @@ const supplierSyncRoutes: FastifyPluginAsync = async (app) => {
       `SELECT m.model_id, m.brand, m.standard, m.display_name, m.active,
               COALESCE(json_agg(json_build_object(
                 'routeId', r.id, 'providerId', p.id, 'providerName', p.name,
-                'priority', r.priority, 'active', r.active AND p.active, 'providerActive', p.active,
+                'priority', r.priority, 'active', r.active AND p.active, 'routeActive', r.active,
                 'upstreamModelId', r.upstream_model_id, 'keyLast4', k.key_last4,
                 'smokeHistory', COALESCE((
                   SELECT json_agg(json_build_object(

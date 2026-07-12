@@ -11,6 +11,10 @@ interface PriorityBody {
   providerIds: string[];
 }
 
+interface RouteActiveBody {
+  active: boolean;
+}
+
 function rowToDto(row: any) {
   return {
     routeId: row.id,
@@ -97,6 +101,29 @@ const modelRoutesRoutes: FastifyPluginAsync = async (app) => {
 
       const { rows } = await app.pg.query(ROUTES_QUERY, [modelId]);
       return rows.map(rowToDto);
+    },
+  );
+
+  // Toggle one model-provider pairing without touching the provider's other
+  // model routes. An admin-disabled route stays disabled across smart syncs.
+  app.patch<{ Params: { modelId: string; routeId: string }; Body: RouteActiveBody }>(
+    "/admin/api/models/:modelId/routes/:routeId",
+    async (request, reply) => {
+      const { modelId, routeId } = request.params;
+      if (typeof request.body?.active !== "boolean") {
+        return reply.code(400).send({ error: "active must be a boolean" });
+      }
+
+      const result = await app.pg.query(
+        "UPDATE reseller_model_routes SET active = $1, admin_disabled = $2 WHERE id = $3 AND model_id = $4",
+        [request.body.active, !request.body.active, routeId, modelId],
+      );
+      if (result.rowCount === 0) return reply.code(404).send({ error: "Route not found" });
+
+      app.routerCache.invalidate();
+      const { rows } = await app.pg.query(ROUTES_QUERY, [modelId]);
+      const route = rows.find((row) => row.id === routeId);
+      return route ? rowToDto(route) : reply.code(404).send({ error: "Route not found" });
     },
   );
 

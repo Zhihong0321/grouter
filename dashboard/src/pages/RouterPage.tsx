@@ -21,15 +21,15 @@ function testSummary(result: ProviderModelTestResultDto | undefined): { text: st
   return { ok, text: ok ? `Alive · ${latency}ms` : result.results.find((item) => !item.ok)?.message ?? "Failed" };
 }
 
-function Pair({ route, model, result, testing, updatingProvider, onTest, onPrimary, onToggleProvider }: {
+function Pair({ route, model, result, testing, updatingRoute, onTest, onPrimary, onToggleRoute }: {
   route: SmartRouteDto;
   model: SmartRoutingModelDto;
   result?: ProviderModelTestResultDto;
   testing: boolean;
-  updatingProvider: string | null;
+  updatingRoute: string | null;
   onTest: () => void;
   onPrimary: () => void;
-  onToggleProvider: () => void;
+  onToggleRoute: () => void;
 }) {
   const summary = testSummary(result);
   return (
@@ -44,8 +44,8 @@ function Pair({ route, model, result, testing, updatingProvider, onTest, onPrima
           {testing ? "Testing…" : "Smoke test"}
         </button>
         <button type="button" className="secondary" onClick={onPrimary} disabled={!route.active || !model.active || route.priority === 1}>Make primary</button>
-        <button type="button" className={route.providerActive ? "danger" : "secondary"} onClick={onToggleProvider} disabled={updatingProvider === route.providerId} title={route.providerActive ? "Disable this provider for every model it serves" : "Enable this provider again"}>
-          {updatingProvider === route.providerId ? "Saving…" : route.providerActive ? "Disable provider" : "Enable provider"}
+        <button type="button" className={route.routeActive ? "danger" : "secondary"} onClick={onToggleRoute} disabled={updatingRoute === route.routeId} title={route.routeActive ? "Stop using this provider for this model only" : "Allow this provider to serve this model again"}>
+          {updatingRoute === route.routeId ? "Saving…" : route.routeActive ? "Disable for this model" : "Enable for this model"}
         </button>
       </div>
       {summary && <small style={{ color: summary.ok ? "#7ee787" : "#ff8080" }}>{summary.text}</small>}
@@ -59,16 +59,16 @@ function Pair({ route, model, result, testing, updatingProvider, onTest, onPrima
   );
 }
 
-function ModelSection({ title, description, models, tests, testingPair, updatingProvider, onTest, onPrimary, onToggleProvider }: {
+function ModelSection({ title, description, models, tests, testingPair, updatingRoute, onTest, onPrimary, onToggleRoute }: {
   title: string;
   description: string;
   models: SmartRoutingModelDto[];
   tests: Record<string, ProviderModelTestResultDto>;
   testingPair: string | null;
-  updatingProvider: string | null;
+  updatingRoute: string | null;
   onTest: (model: SmartRoutingModelDto, route: SmartRouteDto) => void;
   onPrimary: (model: SmartRoutingModelDto, route: SmartRouteDto) => void;
-  onToggleProvider: (route: SmartRouteDto) => void;
+  onToggleRoute: (model: SmartRoutingModelDto, route: SmartRouteDto) => void;
 }) {
   return (
     <section className="card">
@@ -90,8 +90,8 @@ function ModelSection({ title, description, models, tests, testingPair, updating
                   ? <span style={{ color: "#9aa4b2" }}>No compatible active key found. Run Smart sync after adding/syncing keys.</span>
                   : model.routes.map((route) => {
                     const id = `${model.modelId}:${route.providerId}`;
-                    return <Pair key={route.routeId} route={route} model={model} result={tests[id]} testing={testingPair === id} updatingProvider={updatingProvider}
-                      onTest={() => onTest(model, route)} onPrimary={() => onPrimary(model, route)} onToggleProvider={() => onToggleProvider(route)} />;
+                    return <Pair key={route.routeId} route={route} model={model} result={tests[id]} testing={testingPair === id} updatingRoute={updatingRoute}
+                      onTest={() => onTest(model, route)} onPrimary={() => onPrimary(model, route)} onToggleRoute={() => onToggleRoute(model, route)} />;
                   })}
               </td>
             </tr>
@@ -108,7 +108,7 @@ export default function RouterPage() {
   const [syncing, setSyncing] = useState(false);
   const [bulkTesting, setBulkTesting] = useState(false);
   const [testingPair, setTestingPair] = useState<string | null>(null);
-  const [updatingProvider, setUpdatingProvider] = useState<string | null>(null);
+  const [updatingRoute, setUpdatingRoute] = useState<string | null>(null);
   const [tests, setTests] = useState<Record<string, ProviderModelTestResultDto>>({});
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -141,18 +141,18 @@ export default function RouterPage() {
     } finally { setSyncing(false); }
   };
 
-  const toggleProvider = async (route: SmartRouteDto) => {
-    setUpdatingProvider(route.providerId);
+  const toggleRoute = async (model: SmartRoutingModelDto, route: SmartRouteDto) => {
+    setUpdatingRoute(route.routeId);
     setError(null);
     setMessage(null);
     try {
-      const updated = await api.updateProvider(route.providerId, { active: !route.providerActive });
-      setMessage(`${updated.name} is now ${updated.active ? "enabled" : "disabled"} for all routed models.`);
+      await api.setModelRouteActive(model.modelId, route.routeId, !route.routeActive);
+      setMessage(`${route.providerName} is now ${route.routeActive ? "disabled" : "enabled"} for ${model.displayName} only.`);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update provider status");
+      setError(err instanceof Error ? err.message : "Failed to update model-provider route");
     } finally {
-      setUpdatingProvider(null);
+      setUpdatingRoute(null);
     }
   };
 
@@ -208,9 +208,9 @@ export default function RouterPage() {
       {error && <p style={{ color: "#ff8080" }}>{error}</p>}
       {message && <p style={{ color: "#7ee787" }}>{message}</p>}
 
-      <ModelSection title="Anthropic models" description="Priority and backup keys for Claude-family models." models={groups.anthropic} tests={tests} testingPair={testingPair} updatingProvider={updatingProvider} onTest={smokeTest} onPrimary={makePrimary} onToggleProvider={toggleProvider} />
-      <ModelSection title="OpenAI models" description="Priority and backup keys for GPT and OpenAI-family models." models={groups.openai} tests={tests} testingPair={testingPair} updatingProvider={updatingProvider} onTest={smokeTest} onPrimary={makePrimary} onToggleProvider={toggleProvider} />
-      <ModelSection title="Other & China models" description="DeepSeek, Qwen, GLM, Kimi, MiniMax and every remaining synced model." models={[...groups.china, ...groups.other]} tests={tests} testingPair={testingPair} updatingProvider={updatingProvider} onTest={smokeTest} onPrimary={makePrimary} onToggleProvider={toggleProvider} />
+      <ModelSection title="Anthropic models" description="Priority and backup keys for Claude-family models." models={groups.anthropic} tests={tests} testingPair={testingPair} updatingRoute={updatingRoute} onTest={smokeTest} onPrimary={makePrimary} onToggleRoute={toggleRoute} />
+      <ModelSection title="OpenAI models" description="Priority and backup keys for GPT and OpenAI-family models." models={groups.openai} tests={tests} testingPair={testingPair} updatingRoute={updatingRoute} onTest={smokeTest} onPrimary={makePrimary} onToggleRoute={toggleRoute} />
+      <ModelSection title="Other & China models" description="DeepSeek, Qwen, GLM, Kimi, MiniMax and every remaining synced model." models={[...groups.china, ...groups.other]} tests={tests} testingPair={testingPair} updatingRoute={updatingRoute} onTest={smokeTest} onPrimary={makePrimary} onToggleRoute={toggleRoute} />
     </div>
   );
 }

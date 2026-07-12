@@ -11,9 +11,9 @@ export interface SmartRouteSyncResult {
  * Builds the route matrix from the live per-key `/v1/models` results.
  *
  * Existing routes keep their priority: that is the administrator's explicit
- * primary/backup choice.  A newly discovered compatible key is appended as a
+ * primary/backup choice. A newly discovered compatible key is appended as a
  * backup, and a route is disabled when that key no longer advertises the
- * model.  This means a later sync never silently undoes a manual order.
+ * model. Admin-disabled model-provider routes are never reactivated by sync.
  */
 export async function syncSmartRoutes(pg: Pool): Promise<SmartRouteSyncResult> {
   const client = await pg.connect();
@@ -26,6 +26,7 @@ export async function syncSmartRoutes(pg: Pool): Promise<SmartRouteSyncResult> {
        FROM reseller_supplier_keys k
        WHERE (k.provider_id = r.provider_id OR k.anthropic_provider_id = r.provider_id)
          AND r.active = true
+         AND r.admin_disabled = false
          AND (
            k.present_on_supplier = false OR k.status <> 1 OR NOT EXISTS (
              SELECT 1 FROM reseller_supplier_key_models km
@@ -49,12 +50,12 @@ export async function syncSmartRoutes(pg: Pool): Promise<SmartRouteSyncResult> {
     let reactivatedRouteCount = 0;
     const nextPriorityByModel = new Map<string, number>();
     for (const pair of eligible) {
-      const existing = await client.query<{ active: boolean }>(
-        "SELECT active FROM reseller_model_routes WHERE model_id = $1 AND provider_id = $2 FOR UPDATE",
+      const existing = await client.query<{ active: boolean; admin_disabled: boolean }>(
+        "SELECT active, admin_disabled FROM reseller_model_routes WHERE model_id = $1 AND provider_id = $2 FOR UPDATE",
         [pair.model_id, pair.provider_id],
       );
       if (existing.rows[0]) {
-        if (!existing.rows[0].active) {
+        if (!existing.rows[0].active && !existing.rows[0].admin_disabled) {
           await client.query(
             "UPDATE reseller_model_routes SET active = true, upstream_model_id = $1 WHERE model_id = $2 AND provider_id = $3",
             [pair.model_id, pair.model_id, pair.provider_id],

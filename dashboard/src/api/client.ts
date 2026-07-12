@@ -229,7 +229,7 @@ export interface SmartRouteDto {
   providerName: string;
   priority: number;
   active: boolean;
-  providerActive: boolean;
+  routeActive: boolean;
   upstreamModelId: string;
   keyLast4: string | null;
   smokeHistory: { ok: boolean; latencyMs: number; message: string; testedAt: string }[];
@@ -391,6 +391,8 @@ export const api = {
     request<ModelRouteDto[]>(`/models/${modelId}/routes`, { method: "PUT", body: JSON.stringify({ routes }) }),
   setModelRoutePriority: (modelId: string, providerIds: string[]) =>
     request<ModelRouteDto[]>(`/models/${modelId}/routes/priority`, { method: "PUT", body: JSON.stringify({ providerIds }) }),
+  setModelRouteActive: (modelId: string, routeId: string, active: boolean) =>
+    request<ModelRouteDto>(`/models/${modelId}/routes/${routeId}`, { method: "PATCH", body: JSON.stringify({ active }) }),
 
   getTierRoutingConfig: () => request<TierConfigDto>("/tier-routing/config"),
   updateTierRoutingConfig: (
