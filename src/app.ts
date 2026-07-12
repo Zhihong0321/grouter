@@ -43,9 +43,12 @@ declare module "fastify" {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dashboardDist = path.join(__dirname, "..", "dashboard", "dist");
+// Fastify defaults to 1 MiB, which is too small for Codex Responses requests
+// once they include conversation history and tool output.
+const REQUEST_BODY_LIMIT_BYTES = 25 * 1024 * 1024;
 
 export async function buildApp() {
-  const app = Fastify({ logger: true });
+  const app = Fastify({ logger: true, bodyLimit: REQUEST_BODY_LIMIT_BYTES });
 
   await app.register(postgresPlugin);
   await app.register(redisPlugin);
