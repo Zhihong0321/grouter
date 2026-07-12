@@ -1,0 +1,16 @@
+#!/bin/sh
+# Shared pre-push guard. Enabled once per clone with:
+#   git config core.hooksPath .githooks
+# (or run `pnpm run hooks:install`).
+#
+# Blocks pushing any change that would break `node-pg-migrate -j sql` at deploy:
+# deleting / renaming / reordering a migration already on origin/main.
+
+echo "→ Running migration guard before push…"
+node scripts/check-migrations.mjs || {
+  echo ""
+  echo "✗ Push blocked: migration guard failed (see above)."
+  echo "  Migrations already on origin/main are immutable. Add a NEW migration"
+  echo "  with a newer timestamp instead of editing/deleting an applied one."
+  exit 1
+}

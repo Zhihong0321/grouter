@@ -12,6 +12,8 @@
     "build": "pnpm build:dashboard && pnpm build:backend",
     "dev": "tsx watch src/server.ts",
     "start": "node dist/server.js",
+    "check:migrations": "node scripts/check-migrations.mjs",
+    "hooks:install": "git config core.hooksPath .githooks",
     "migrate": "node-pg-migrate -j sql",
     "migrate:up": "node-pg-migrate -j sql up",
     "migrate:down": "node-pg-migrate -j sql down",
