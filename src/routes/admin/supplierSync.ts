@@ -56,6 +56,8 @@ function priceSyncStateDto(row: Record<string, unknown> | undefined) {
     lastAttemptAt: row.last_attempt_at,
     lastSuccessAt: row.last_success_at,
     lastSyncedModelCount: Number(row.last_synced_model_count ?? 0),
+    lastMatchedCount: Number(row.last_matched_count ?? 0),
+    lastFallbackCount: Number(row.last_fallback_count ?? 0),
     lastErrorType: row.last_error_type,
     lastError: row.last_error,
   };
@@ -446,15 +448,46 @@ const supplierSyncRoutes: FastifyPluginAsync = async (app) => {
     }
   });
 
-  // Sync pricing from SubRouter's pricing API
+  // Sync pricing from SubRouter's pricing API. Returns the synced supplier cost
+  // for every reseller model, joined to our retail price so the dashboard can
+  // show cost, retail, and margin side by side in one call.
   app.get("/admin/api/supplier-sync/pricing", { preHandler: requireAdmin }, async () => {
-    const { rows } = await app.pg.query(
-      "SELECT * FROM reseller_supplier_price_sync_state WHERE supplier = $1",
-      ["subrouter"],
-    );
+    const [stateResult, costsResult] = await Promise.all([
+      app.pg.query("SELECT * FROM reseller_supplier_price_sync_state WHERE supplier = $1", ["subrouter"]),
+      app.pg.query(
+        `SELECT m.model_id, m.display_name,
+                p.input_price_cents_per_million, p.output_price_cents_per_million,
+                c.matched_group, c.provider_name, c.is_fallback,
+                c.input_price, c.output_price, c.cache_read_price, c.cache_creation_price,
+                c.currency, c.official_input_price, c.official_output_price, c.last_synced_at
+         FROM reseller_models m
+         LEFT JOIN reseller_model_prices p ON p.model_id = m.model_id
+         LEFT JOIN reseller_supplier_model_costs c ON c.model_id = m.model_id AND c.supplier = $1
+         ORDER BY m.brand, m.model_id`,
+        ["subrouter"],
+      ),
+    ]);
+
     return {
       supplier: "subrouter",
-      sync: priceSyncStateDto(rows[0]),
+      sync: priceSyncStateDto(stateResult.rows[0]),
+      costs: costsResult.rows.map((row) => ({
+        modelId: row.model_id,
+        displayName: row.display_name,
+        retailInputCentsPerMillion: row.input_price_cents_per_million == null ? null : Number(row.input_price_cents_per_million),
+        retailOutputCentsPerMillion: row.output_price_cents_per_million == null ? null : Number(row.output_price_cents_per_million),
+        matchedGroup: row.matched_group,
+        providerName: row.provider_name,
+        isFallback: row.is_fallback,
+        costInputPrice: row.input_price == null ? null : Number(row.input_price),
+        costOutputPrice: row.output_price == null ? null : Number(row.output_price),
+        costCacheReadPrice: row.cache_read_price == null ? null : Number(row.cache_read_price),
+        costCacheCreationPrice: row.cache_creation_price == null ? null : Number(row.cache_creation_price),
+        currency: row.currency,
+        officialInputPrice: row.official_input_price == null ? null : Number(row.official_input_price),
+        officialOutputPrice: row.official_output_price == null ? null : Number(row.official_output_price),
+        lastSyncedAt: row.last_synced_at,
+      })),
     };
   });
 

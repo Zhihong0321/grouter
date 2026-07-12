@@ -66,12 +66,28 @@ export interface SubRouterModelCatalog {
   groups: Record<string, string[]>;
 }
 
+/** One sub-provider's cost for a model, exactly as SubRouter reports it. */
+export interface SubRouterProviderPrice {
+  /** SubRouter group identifier, e.g. "provider:mixmix123" -- matches a key's supplier_group. */
+  group: string;
+  providerSlug: string;
+  providerName: string;
+  upstreamModel: string;
+  /** Cost per unit as SubRouter prices it; currency varies per provider (CNY or USD). */
+  inputPrice: number;
+  outputPrice: number;
+  cacheReadPrice: number | null;
+  cacheCreationPrice: number | null;
+  currency: string;
+}
+
 export interface SubRouterModelPrice {
   model: string;
-  provider: string;
-  inputPricePerMillion: number;
-  outputPricePerMillion: number;
-  currency: string;
+  /** Anthropic/vendor list price for reference -- NOT what the reseller pays. */
+  officialInputPrice: number | null;
+  officialOutputPrice: number | null;
+  /** Every sub-provider that can serve this model, cheapest first. */
+  providerPrices: SubRouterProviderPrice[];
 }
 
 export interface SubRouterPricingCatalog {
@@ -294,27 +310,54 @@ export class SubRouterClient {
   }
 
   async listPricing(): Promise<SubRouterPricingCatalog> {
+    // The envelope's `data` IS the models array -- get() already unwraps the
+    // { success, data } envelope, so result.data is the array itself here.
     const result = await this.get("/api/pricing");
-    if (!isRecord(result.data) || !Array.isArray(result.data.data)) {
+    if (!Array.isArray(result.data)) {
       throw new SubRouterError("invalid_response", "SubRouter pricing response was invalid");
     }
 
+    const optionalNumber = (value: unknown): number | null => {
+      if (value == null) return null;
+      const parsed = typeof value === "number" ? value : Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+
     const models: SubRouterModelPrice[] = [];
-    for (const item of result.data.data) {
+    for (const item of result.data) {
       if (!isRecord(item)) continue;
       if (typeof item.model_name !== "string") continue;
 
-      const inputPrice = typeof item.official_input_price === "number" ? item.official_input_price : Number(item.official_input_price);
-      const outputPrice = typeof item.official_output_price === "number" ? item.official_output_price : Number(item.official_output_price);
+      const providerPrices: SubRouterProviderPrice[] = [];
+      if (Array.isArray(item.provider_prices)) {
+        for (const raw of item.provider_prices) {
+          if (!isRecord(raw)) continue;
+          const inputPrice = optionalNumber(raw.input_price);
+          const outputPrice = optionalNumber(raw.output_price);
+          if (inputPrice == null || outputPrice == null) continue;
+          providerPrices.push({
+            group: typeof raw.group === "string" ? raw.group : "",
+            providerSlug: typeof raw.provider_slug === "string" ? raw.provider_slug : "",
+            providerName: typeof raw.provider_name === "string" ? raw.provider_name : "",
+            upstreamModel: typeof raw.upstream_model === "string" ? raw.upstream_model : String(item.model_name),
+            inputPrice,
+            outputPrice,
+            cacheReadPrice: optionalNumber(raw.cache_read_price),
+            cacheCreationPrice: optionalNumber(raw.cache_creation_price),
+            currency: typeof raw.price_currency === "string" ? raw.price_currency : "USD",
+          });
+        }
+      }
 
-      if (isNaN(inputPrice) || isNaN(outputPrice)) continue;
+      // SubRouter already returns providers cheapest-first via sort_score, but
+      // sort defensively so downstream "cheapest = first" holds regardless.
+      providerPrices.sort((a, b) => a.inputPrice + a.outputPrice - (b.inputPrice + b.outputPrice));
 
       models.push({
         model: String(item.model_name),
-        provider: typeof item.vendor_id === "number" ? `vendor_${item.vendor_id}` : "unknown",
-        inputPricePerMillion: inputPrice,
-        outputPricePerMillion: outputPrice,
-        currency: "USD",
+        officialInputPrice: optionalNumber(item.official_input_price),
+        officialOutputPrice: optionalNumber(item.official_output_price),
+        providerPrices,
       });
     }
 

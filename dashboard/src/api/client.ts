@@ -68,6 +68,54 @@ export interface ModelPriceDto {
   updatedAt: string;
 }
 
+export interface SupplierModelCostDto {
+  modelId: string;
+  displayName: string;
+  /** Our retail price (cents per million), from reseller_model_prices. */
+  retailInputCentsPerMillion: number | null;
+  retailOutputCentsPerMillion: number | null;
+  /** The subrouter provider group we matched, or null when we fell back. */
+  matchedGroup: string | null;
+  providerName: string | null;
+  /** True when no key group matched and we recorded the cheapest provider instead. */
+  isFallback: boolean | null;
+  /** Supplier cost, in the supplier's own unit + currency (unconverted). */
+  costInputPrice: number | null;
+  costOutputPrice: number | null;
+  costCacheReadPrice: number | null;
+  costCacheCreationPrice: number | null;
+  currency: string | null;
+  /** Vendor list price (e.g. Anthropic official $/M) for reference only. */
+  officialInputPrice: number | null;
+  officialOutputPrice: number | null;
+  lastSyncedAt: string | null;
+}
+
+export interface SupplierPricingDto {
+  supplier: "subrouter";
+  sync: {
+    lastAttemptAt: string | null;
+    lastSuccessAt: string | null;
+    lastSyncedModelCount: number;
+    lastMatchedCount: number;
+    lastFallbackCount: number;
+    lastErrorType: string | null;
+    lastError: string | null;
+  } | null;
+  costs: SupplierModelCostDto[];
+}
+
+export interface SupplierPriceSyncResultDto {
+  synchronized: true;
+  supplier: "subrouter";
+  totalSupplierModels: number;
+  syncedModelCount: number;
+  matchedCount: number;
+  fallbackCount: number;
+  unpricedModelIds: string[];
+  syncedAt: string;
+}
+
 export interface UsageBreakdown {
   input_tokens: string;
   output_tokens: string;
@@ -355,6 +403,9 @@ export const api = {
   listPrices: () => request<ModelPriceDto[]>("/prices"),
   updatePrice: (modelId: string, body: Partial<ModelPriceDto>) =>
     request<ModelPriceDto>(`/prices/${modelId}`, { method: "PATCH", body: JSON.stringify(body) }),
+
+  getSupplierPricing: () => request<SupplierPricingDto>("/supplier-sync/pricing"),
+  syncSupplierPricing: () => request<SupplierPriceSyncResultDto>("/supplier-sync/pricing", { method: "POST" }),
 
   getSettings: () => request<SettingsDto>("/settings"),
   updateSettings: (body: { keyPrefix?: string }) => request<SettingsDto>("/settings", { method: "PATCH", body: JSON.stringify(body) }),
