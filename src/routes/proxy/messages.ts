@@ -62,9 +62,11 @@ const proxyRoutes: FastifyPluginAsync = async (app) => {
     let tierConfig: TierConfig | undefined;
     if (smartRoutingEnabled) {
       tierConfig = await app.settingsCache.getTierConfig();
-      const smallFastModelName = await app.settingsCache.getSmallFastModelName();
-      const sig = signalsFromAnthropic(body, { tiers: tierConfig.tiers, smallFastModelName });
-      decision = decideTier(sig, tierConfig);
+      const sig = signalsFromAnthropic(body, {
+        tiers: tierConfig.tiers.anthropic,
+        smallFastModelName: tierConfig.smallFastModelName,
+      });
+      decision = decideTier(sig, tierConfig.tiers.anthropic, tierConfig, requestedModel);
       if (decision.chosenModel !== requestedModel) {
         if (keyRecord.modelRestrictions && !keyRecord.modelRestrictions.includes(decision.chosenModel)) {
           decision = fallbackDecision(decision, requestedModel, "restricted_fallback");
@@ -155,7 +157,7 @@ const proxyRoutes: FastifyPluginAsync = async (app) => {
     // vs what was actually billed.
     const computeSavings = async (usage: CapturedUsage): Promise<{ costBaselineCents?: number; costSavedCents?: number }> => {
       if (!decision?.wasOverridden || !tierConfig) return {};
-      const baselinePrice = await app.priceCache.get(tierConfig.tiers[decision.requestedTier]);
+      const baselinePrice = await app.priceCache.get(tierConfig.tiers.anthropic[decision.requestedTier]);
       if (!baselinePrice) return {};
       const costBaselineCents = computeCostCents(usage, baselinePrice).totalCostCents;
       const costSavedCents = Math.max(0, costBaselineCents - computeCostCents(usage, price).totalCostCents);
