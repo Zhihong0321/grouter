@@ -100,12 +100,13 @@ export default function SupplierActivityPage() {
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Recent supplier activity</h3>
         <table>
-          <thead><tr><th>Time</th><th>Supplier key</th><th>Model</th><th>Input</th><th>Output</th><th>Cache</th><th>Cost</th><th>Provider</th></tr></thead>
+          <thead><tr><th>Time</th><th>Supplier key</th><th>User key</th><th>Model</th><th>Input</th><th>Output</th><th>Cache</th><th>Cost</th><th>Provider</th></tr></thead>
           <tbody>
             {(data?.activity ?? []).map((row) => (
               <tr key={`${row.logId}:${row.createdAt}`}>
                 <td>{new Date(row.createdAt).toLocaleString()}</td>
                 <td>{row.tokenName ?? "—"}</td>
+                <td>{row.customerKeyName ? <span className="badge user-key-badge">{row.customerKeyName}</span> : "—"}</td>
                 <td>{row.modelName ?? "—"}</td>
                 <td>{integer(row.promptTokens)}</td>
                 <td>{integer(row.completionTokens)}</td>
@@ -114,7 +115,7 @@ export default function SupplierActivityPage() {
                 <td>{row.providerName ?? row.channelName ?? "—"}</td>
               </tr>
             ))}
-            {data && data.activity.length === 0 && <tr><td colSpan={8} style={{ color: "#9aa4b2" }}>No supplier activity synchronized yet.</td></tr>}
+            {data && data.activity.length === 0 && <tr><td colSpan={9} style={{ color: "#9aa4b2" }}>No supplier activity synchronized yet.</td></tr>}
           </tbody>
         </table>
       </div>

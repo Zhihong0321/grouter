@@ -321,6 +321,7 @@ export interface SupplierActivityDto {
   channelName: string | null;
   requestId: string | null;
   logId: string;
+  customerKeyName: string | null;
 }
 
 export interface SupplierActivityDashboardDto {

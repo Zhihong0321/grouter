@@ -166,12 +166,16 @@ const supplierSyncRoutes: FastifyPluginAsync = async (app) => {
         ["subrouter"],
       ),
       app.pg.query(
-        `SELECT external_created_at, token_name, model_name, prompt_tokens, completion_tokens,
-                cache_tokens, wallet_cost_usd, supplier_group, provider_name, channel_name,
-                external_request_id, external_log_id
-         FROM reseller_supplier_activity
-         WHERE supplier = $1
-         ORDER BY external_created_at DESC, external_log_id DESC
+        `SELECT activity.external_created_at, activity.token_name, activity.model_name, activity.prompt_tokens, activity.completion_tokens,
+                activity.cache_tokens, activity.wallet_cost_usd, activity.supplier_group, activity.provider_name, activity.channel_name,
+                activity.external_request_id, activity.external_log_id,
+                customer_key.name AS customer_key_name
+         FROM reseller_supplier_activity activity
+         LEFT JOIN reseller_usage_supplier_matches usage_match ON usage_match.supplier_activity_id = activity.id
+         LEFT JOIN reseller_usage_logs usage ON usage.id = usage_match.usage_log_id
+         LEFT JOIN reseller_api_keys customer_key ON customer_key.id = usage.key_id
+         WHERE activity.supplier = $1
+         ORDER BY activity.external_created_at DESC, activity.external_log_id DESC
          LIMIT 200`,
         ["subrouter"],
       ),
@@ -207,6 +211,7 @@ const supplierSyncRoutes: FastifyPluginAsync = async (app) => {
         channelName: row.channel_name,
         requestId: row.external_request_id,
         logId: row.external_log_id,
+        customerKeyName: row.customer_key_name,
       })),
     };
   });

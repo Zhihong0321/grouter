@@ -23,6 +23,7 @@ button.danger { background: #c0392b; }
 .badge { padding: 2px 8px; border-radius: 12px; font-size: 12px; }
 .badge.active { background: #1e4020; color: #7ee787; }
 .badge.revoked { background: #401e1e; color: #ff8080; }
+.badge.user-key-badge { background: #173a73; color: #a9c8ff; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .plaintext-reveal-row { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
 .plaintext-reveal { flex: 1; background: #1a1d24; border: 1px dashed #3b6fe0; padding: 12px; border-radius: 8px; font-family: monospace; color: inherit; min-width: 0; }
 .breakdown-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 12px; }
