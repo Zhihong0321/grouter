@@ -10,6 +10,22 @@ use tokio::sync::mpsc;
 
 use crate::error::AppError;
 
+/// Spawning a console-subsystem child (npm, py, a CLI's `--version`) from our
+/// GUI process pops a visible console window per command on Windows. This flag
+/// suppresses it. Every child we launch is non-interactive -- version probes and
+/// installs whose output we stream to the UI -- so there's never a console the
+/// user needs to see.
+#[cfg(target_os = "windows")]
+pub(crate) const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// A `tokio` Command with the no-console-window flag applied on Windows.
+pub(crate) fn quiet_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    let mut c = Command::new(program);
+    #[cfg(target_os = "windows")]
+    c.creation_flags(CREATE_NO_WINDOW);
+    c
+}
+
 struct ToolSpec {
     id: &'static str,
     bin: &'static str,
@@ -66,7 +82,7 @@ async fn detect_one(spec: &ToolSpec) -> ToolInstallStatus {
     let resolved = which::which(spec.bin).ok();
     let (installed, version, path) = match &resolved {
         Some(p) => {
-            let version = Command::new(p)
+            let version = quiet_command(p)
                 .arg("--version")
                 .output()
                 .await
@@ -130,7 +146,7 @@ pub(crate) fn emit_tool_log(app: &AppHandle, tool_id: &str, line: impl Into<Stri
 pub(crate) fn shell_command(program: &str, args: &[&str]) -> Command {
     #[cfg(target_os = "windows")]
     {
-        let mut c = Command::new("cmd");
+        let mut c = quiet_command("cmd");
         c.arg("/C").arg(program);
         for a in args {
             c.arg(a);
@@ -139,7 +155,7 @@ pub(crate) fn shell_command(program: &str, args: &[&str]) -> Command {
     }
     #[cfg(not(target_os = "windows"))]
     {
-        let mut c = Command::new(program);
+        let mut c = quiet_command(program);
         for a in args {
             c.arg(a);
         }

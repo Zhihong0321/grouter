@@ -295,6 +295,19 @@ fn skill_dir_exists(agent: &str, skill: &str) -> bool {
     agent_config_dir(agent).join("skills").join(skill).exists()
 }
 
+/// A `std::process::Command` with the no-console-window flag applied on Windows.
+/// The Python-version probes here (`py -3.13`, `python -c ...`) run on the
+/// Marketplace tab's detection path and would each flash a console otherwise.
+fn quiet_std_command(program: &str) -> std::process::Command {
+    let mut c = std::process::Command::new(program);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        c.creation_flags(crate::tools::CREATE_NO_WINDOW);
+    }
+    c
+}
+
 /// A resolved way to invoke a Python interpreter: `program` plus any leading
 /// args (e.g. the `py` launcher needs a `-3.11` version selector, whereas a
 /// bare `python` needs none). Kept together so callers can append `-m pip ...`
@@ -317,7 +330,7 @@ fn python_minor(program: &str, prefix: &[String]) -> Option<u32> {
     let mut args: Vec<&str> = prefix.iter().map(String::as_str).collect();
     args.push("-c");
     args.push("import sys;print(sys.version_info[0]*100+sys.version_info[1])");
-    let out = std::process::Command::new(program).args(&args).output().ok()?;
+    let out = quiet_std_command(program).args(&args).output().ok()?;
     if !out.status.success() {
         return None;
     }
@@ -360,7 +373,7 @@ fn python_module_importable(module: &str) -> bool {
     let Some(py) = resolve_python() else { return false };
     let code = format!("import importlib.util,sys; sys.exit(0 if importlib.util.find_spec('{module}') else 1)");
     let args = py.args(&["-c", &code]);
-    std::process::Command::new(&py.program)
+    quiet_std_command(&py.program)
         .args(&args)
         .output()
         .map(|out| out.status.success())
