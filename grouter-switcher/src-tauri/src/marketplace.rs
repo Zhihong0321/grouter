@@ -66,11 +66,9 @@ enum Detect {
     /// to "marketplace only" if the cache layout doesn't match what we
     /// guessed, since the exact schema isn't publicly documented.
     ClaudePlugin { marketplace: &'static str, plugin: &'static str },
-    /// `npx skills add -g -a <agent>` places skills at ~/.<agent>/skills/<name>
-    /// per the skills CLI's documented global-install convention. Currently
-    /// unused -- the skill-based entries now ship bundled -- but kept as the
-    /// detection vocabulary for any future shell-installed skill entry.
-    #[allow(dead_code)]
+    /// A skill folder named `<skill>` exists directly under the agent's skills
+    /// dir (`~/.<agent>/skills/<skill>`) -- e.g. ECC's `ecc-install --target
+    /// claude` writes its managed skills into `~/.claude/skills/ecc`.
     SkillDir { agent: &'static str, skill: &'static str },
     /// For plain pip-installed CLIs (not a Claude/Codex plugin at all):
     /// a console_scripts entry point landing on PATH is the install signal.
@@ -108,17 +106,32 @@ static ENTRIES: &[MarketplaceEntry] = &[
         windows: true,
         mac: true,
         bundle: None,
+        // Use ECC's own installer rather than `claude plugin install`. The
+        // plugin route silently drops rules and hooks (an upstream plugin
+        // limitation ECC documents), whereas `ecc-install --target claude`
+        // writes the full managed set -- skills, agents, rules/ecc, and
+        // hooks/hooks.json. `ecc-install` is a bin of the `ecc-universal`
+        // package, so `-p ecc-universal` names it explicitly and `-y` skips
+        // npx's "install this package?" prompt so it can't stall.
         claude: Some(AgentPlan {
             steps: &[
-                Step { program: "claude", args: &["plugin", "marketplace", "add", "https://github.com/affaan-m/ECC"] },
-                Step { program: "claude", args: &["plugin", "install", "ecc@ecc"] },
+                Step {
+                    program: "npx",
+                    args: &["-y", "-p", "ecc-universal", "ecc-install", "--profile", "full", "--target", "claude"],
+                },
             ],
-            detect: Detect::ClaudePlugin { marketplace: "ecc", plugin: "ecc" },
+            detect: Detect::SkillDir { agent: "claude", skill: "ecc" },
         }),
-        codex: None,
-        codex_note: Some(
-            "ECC ships its own multi-harness installer for Codex (`npx ecc-install --profile full`) -- run that yourself; it isn't wired up here.",
-        ),
+        codex: Some(AgentPlan {
+            steps: &[
+                Step {
+                    program: "npx",
+                    args: &["-y", "-p", "ecc-universal", "ecc-install", "--profile", "full", "--target", "codex"],
+                },
+            ],
+            detect: Detect::SkillDir { agent: "codex", skill: "ecc" },
+        }),
+        codex_note: None,
     },
     MarketplaceEntry {
         id: "claude-plugins-official",
@@ -422,10 +435,10 @@ pub async fn install_marketplace_entry(app: AppHandle, id: String, agent: String
 
     for (index, step) in plan.steps.iter().enumerate() {
         if which::which(step.program).is_err() {
-            let message = if step.program == "claude" {
-                "Claude Code CLI is not installed -- install it from the Tools tab first".to_string()
-            } else {
-                format!("\"{}\" is not on PATH", step.program)
+            let message = match step.program {
+                "claude" => "Claude Code CLI is not installed -- install it from the Tools tab first".to_string(),
+                "npx" => "Node.js (which provides npx) is not on PATH -- install Node.js first, then retry".to_string(),
+                other => format!("\"{other}\" is not on PATH"),
             };
             emit_tool_log(&app, &log_id, format!("Cannot start step {} of {step_count}: {message}", index + 1));
             let _ = app.emit("tool-log-done", ToolLogDonePayload { tool: log_id, success: false, exit_code: None });
@@ -649,8 +662,11 @@ mod tests {
     fn entry_for_and_plan_for_report_not_found_instead_of_panicking() {
         assert!(entry_for("does-not-exist").is_err());
         let ecc = entry_for("ecc").unwrap();
-        assert!(plan_for(ecc, "codex").is_err()); // ECC has no automated codex plan
         assert!(plan_for(ecc, "claude").is_ok());
+        assert!(plan_for(ecc, "opencode").is_err()); // no plan for an unknown agent
+        // Crawl4AI is claude-only, so it has no automated codex shell plan.
+        let crawl4ai = entry_for("crawl4ai").unwrap();
+        assert!(plan_for(crawl4ai, "codex").is_err());
     }
 
     #[test]
