@@ -117,10 +117,12 @@ pub async fn recover_account(state: State<'_, AppState>, recovery_password: Stri
 #[derive(Serialize)]
 pub struct BalanceResult {
     pub username: String,
+    // balance/spent are derived from `numeric` budget_cents/spent_cents and can
+    // be fractional, so keep them as f64 (see UsageEntry::cost_cents).
     #[serde(rename = "balanceCents")]
-    pub balance_cents: Option<i64>,
+    pub balance_cents: Option<f64>,
     #[serde(rename = "spentCents")]
-    pub spent_cents: i64,
+    pub spent_cents: f64,
     pub unlimited: bool,
 }
 
@@ -128,9 +130,9 @@ pub struct BalanceResult {
 struct MeResponseBody {
     username: String,
     #[serde(rename = "balanceCents")]
-    balance_cents: Option<i64>,
+    balance_cents: Option<f64>,
     #[serde(rename = "spentCents")]
-    spent_cents: i64,
+    spent_cents: f64,
     unlimited: bool,
 }
 
@@ -173,8 +175,12 @@ pub struct UsageEntry {
     pub cache_creation_input_tokens: i64,
     #[serde(rename = "cacheReadInputTokens")]
     pub cache_read_input_tokens: i64,
+    // cost_cents is a Postgres `numeric` and, since per-model pricing landed,
+    // carries sub-cent fractions (e.g. 4.0573). It serializes as a JSON float,
+    // so this must be f64 -- serde_json refuses to decode a float into an int
+    // and reqwest surfaced that as "error decoding response body".
     #[serde(rename = "costCents")]
-    pub cost_cents: i64,
+    pub cost_cents: f64,
     pub stream: bool,
     #[serde(rename = "createdAt")]
     pub created_at: String,
@@ -184,8 +190,9 @@ pub struct UsageEntry {
 pub struct UsageResult {
     #[serde(rename = "requestCount")]
     pub request_count: i64,
+    // Fractional (numeric) -- see UsageEntry::cost_cents.
     #[serde(rename = "costCents")]
-    pub cost_cents: i64,
+    pub cost_cents: f64,
     #[serde(rename = "inputTokens")]
     pub input_tokens: i64,
     #[serde(rename = "outputTokens")]
