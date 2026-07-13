@@ -70,9 +70,13 @@ enum Detect {
     /// dir (`~/.<agent>/skills/<skill>`) -- e.g. ECC's `ecc-install --target
     /// claude` writes its managed skills into `~/.claude/skills/ecc`.
     SkillDir { agent: &'static str, skill: &'static str },
-    /// For plain pip-installed CLIs (not a Claude/Codex plugin at all):
-    /// a console_scripts entry point landing on PATH is the install signal.
-    Binary(&'static str),
+    /// A pip-installed Python package (not a Claude/Codex plugin at all) that
+    /// we detect by asking the *same* interpreter we installed into whether it
+    /// can import the module -- `<py> -c "import <module>"`. We deliberately do
+    /// not check for a console-script on PATH: pip drops those in a per-user
+    /// `Scripts\` dir that a GUI app's inherited PATH almost never contains, so
+    /// PATH detection reports "not installed" even right after a good install.
+    PythonModule(&'static str),
 }
 
 struct AgentPlan {
@@ -214,11 +218,15 @@ static ENTRIES: &[MarketplaceEntry] = &[
         mac: true,
         bundle: None,
         claude: Some(AgentPlan {
+            // `program: "python"` is a placeholder the install loop swaps for a
+            // resolved interpreter (see resolve_python) -- pinning a Python with
+            // wheels and driving setup through `-c` instead of relying on the
+            // `crawl4ai-setup` console-script being on a GUI app's PATH.
             steps: &[
-                Step { program: "pip", args: &["install", "-U", "crawl4ai"] },
-                Step { program: "crawl4ai-setup", args: &[] },
+                Step { program: "python", args: &["-m", "pip", "install", "--user", "-U", "crawl4ai"] },
+                Step { program: "python", args: &["-c", "from crawl4ai.install import post_install; post_install()"] },
             ],
-            detect: Detect::Binary("crawl4ai-doctor"),
+            detect: Detect::PythonModule("crawl4ai"),
         }),
         codex: None,
         codex_note: Some(
@@ -287,6 +295,78 @@ fn skill_dir_exists(agent: &str, skill: &str) -> bool {
     agent_config_dir(agent).join("skills").join(skill).exists()
 }
 
+/// A resolved way to invoke a Python interpreter: `program` plus any leading
+/// args (e.g. the `py` launcher needs a `-3.11` version selector, whereas a
+/// bare `python` needs none). Kept together so callers can append `-m pip ...`
+/// or `-c "..."` to the same interpreter that detection will later probe.
+struct Python {
+    program: String,
+    prefix: Vec<String>,
+}
+
+impl Python {
+    /// Args to pass this interpreter, i.e. `prefix` followed by `extra`.
+    fn args<'a>(&'a self, extra: &[&'a str]) -> Vec<&'a str> {
+        self.prefix.iter().map(String::as_str).chain(extra.iter().copied()).collect()
+    }
+}
+
+/// Runs `<py> -c "import sys; print(major*100+minor)"` and returns that number
+/// (e.g. 311) so callers can gate on version without shelling a second time.
+fn python_minor(program: &str, prefix: &[String]) -> Option<u32> {
+    let mut args: Vec<&str> = prefix.iter().map(String::as_str).collect();
+    args.push("-c");
+    args.push("import sys;print(sys.version_info[0]*100+sys.version_info[1])");
+    let out = std::process::Command::new(program).args(&args).output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8(out.stdout).ok()?.trim().parse().ok()
+}
+
+/// Finds a Python interpreter suitable for installing crawl4ai: 3.10-3.13.
+///
+/// We reject 3.14+ on purpose -- crawl4ai's native-wheel deps (lxml,
+/// tokenizers, playwright) don't publish cp314 wheels yet, so pip falls back to
+/// building from source and the install dies. On Windows the `py` launcher can
+/// target an exact version (`py -3.13`), which is how we reach a 3.11 that has
+/// wheels even when the default `python` on PATH is 3.14. We probe newest-first
+/// so a user with several versions gets the most recent supported one.
+fn resolve_python() -> Option<Python> {
+    // `py -X.Y` selectors, newest supported first.
+    for minor in ["-3.13", "-3.12", "-3.11", "-3.10"] {
+        let prefix = vec![minor.to_string()];
+        if let Some(v) = python_minor("py", &prefix) {
+            if (310..=313).contains(&v) {
+                return Some(Python { program: "py".to_string(), prefix });
+            }
+        }
+    }
+    // Fall back to bare interpreters on PATH, accepting only a supported range.
+    for program in ["python3", "python"] {
+        if let Some(v) = python_minor(program, &[]) {
+            if (310..=313).contains(&v) {
+                return Some(Python { program: program.to_string(), prefix: vec![] });
+            }
+        }
+    }
+    None
+}
+
+/// Whether `import <module>` succeeds under any interpreter we'd install into.
+/// Detection must use the same resolver as install so it probes the exact
+/// Python the package landed in -- not the default `python` on PATH.
+fn python_module_importable(module: &str) -> bool {
+    let Some(py) = resolve_python() else { return false };
+    let code = format!("import importlib.util,sys; sys.exit(0 if importlib.util.find_spec('{module}') else 1)");
+    let args = py.args(&["-c", &code]);
+    std::process::Command::new(&py.program)
+        .args(&args)
+        .output()
+        .map(|out| out.status.success())
+        .unwrap_or(false)
+}
+
 #[derive(Serialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum InstallState {
@@ -321,8 +401,8 @@ fn detect_state(detect: &Detect) -> InstallState {
                 InstallState::NotInstalled
             }
         }
-        Detect::Binary(name) => {
-            if which::which(name).is_ok() {
+        Detect::PythonModule(module) => {
+            if python_module_importable(module) {
                 InstallState::Installed
             } else {
                 InstallState::NotInstalled
@@ -433,23 +513,48 @@ pub async fn install_marketplace_entry(app: AppHandle, id: String, agent: String
     let step_count = plan.steps.len();
     emit_tool_log(&app, &log_id, format!("Preparing {agent} install for {}...", entry.label));
 
+    // Entries that install a Python package carry `program: "python"` placeholder
+    // steps; resolve one concrete interpreter (3.10-3.13, with wheels) up front so
+    // every step -- and detection afterwards -- targets the same Python. Failing
+    // here with a clear message beats a cryptic "not on PATH" mid-install.
+    let python = if matches!(plan.detect, Detect::PythonModule(_)) {
+        match resolve_python() {
+            Some(py) => Some(py),
+            None => {
+                emit_tool_log(&app, &log_id, "No suitable Python found. Install Python 3.11, 3.12, or 3.13 from python.org (3.14+ has no compatible wheels yet), then retry.");
+                let _ = app.emit("tool-log-done", ToolLogDonePayload { tool: log_id, success: false, exit_code: None });
+                return Ok(());
+            }
+        }
+    } else {
+        None
+    };
+
     for (index, step) in plan.steps.iter().enumerate() {
-        if which::which(step.program).is_err() {
+        // Swap the `python` placeholder for the resolved interpreter (program +
+        // any version-selector prefix like `-3.11`); other steps run verbatim.
+        let (program, args): (String, Vec<String>) = match (&python, step.program) {
+            (Some(py), "python") => (
+                py.program.clone(),
+                py.args(step.args).into_iter().map(str::to_string).collect(),
+            ),
+            _ => (step.program.to_string(), step.args.iter().map(|a| a.to_string()).collect()),
+        };
+        let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+
+        if which::which(&program).is_err() {
             let message = match step.program {
                 "claude" => "Claude Code CLI is not installed -- install it from the Tools tab first".to_string(),
                 "npx" => "Node.js (which provides npx) is not on PATH -- install Node.js first, then retry".to_string(),
-                other => format!("\"{other}\" is not on PATH"),
+                _ => format!("\"{program}\" is not on PATH"),
             };
             emit_tool_log(&app, &log_id, format!("Cannot start step {} of {step_count}: {message}", index + 1));
             let _ = app.emit("tool-log-done", ToolLogDonePayload { tool: log_id, success: false, exit_code: None });
             return Ok(());
         }
-        let command = std::iter::once(step.program)
-            .chain(step.args.iter().copied())
-            .collect::<Vec<_>>()
-            .join(" ");
+        let command = std::iter::once(program.as_str()).chain(arg_refs.iter().copied()).collect::<Vec<_>>().join(" ");
         emit_tool_log(&app, &log_id, format!("Step {} of {step_count}: {command}", index + 1));
-        let cmd = shell_command(step.program, step.args);
+        let cmd = shell_command(&program, &arg_refs);
         let (success, exit_code) = run_streamed(&app, &log_id, cmd).await?;
         if !success {
             emit_tool_log(&app, &log_id, format!("Step {} failed (exit code {}).", index + 1, exit_code.map_or("unknown".to_string(), |code| code.to_string())));
@@ -596,25 +701,29 @@ mod tests {
     }
 
     #[test]
-    fn binary_detect_reflects_path_membership() {
-        let _guard = lock_env();
-        let dir = sandbox("binary-detect");
-        let fake_bin_dir = dir.join("bin");
-        fs::create_dir_all(&fake_bin_dir).unwrap();
-        fs::write(fake_bin_dir.join("fake-crawl4ai-doctor.cmd"), "@echo off\n").unwrap();
-
-        let original_path = std::env::var("PATH").unwrap_or_default();
-        assert!(which::which("fake-crawl4ai-doctor").is_err());
-        assert!(matches!(detect_state(&Detect::Binary("fake-crawl4ai-doctor")), InstallState::NotInstalled));
-
-        unsafe {
-            std::env::set_var("PATH", format!("{};{}", fake_bin_dir.display(), original_path));
+    fn python_module_detect_reflects_importability() {
+        // If this machine has no supported Python at all, detection can only say
+        // "not installed" -- assert that and skip the positive case rather than
+        // fail on an unrelated environment gap.
+        let stdlib = detect_state(&Detect::PythonModule("json"));
+        if resolve_python().is_none() {
+            assert!(matches!(stdlib, InstallState::NotInstalled));
+            return;
         }
-        assert!(matches!(detect_state(&Detect::Binary("fake-crawl4ai-doctor")), InstallState::Installed));
-        assert!(matches!(detect_state(&Detect::Binary("definitely-does-not-exist-xyz")), InstallState::NotInstalled));
+        // `json` is in every stdlib, so it must import; a nonsense module must not.
+        assert!(matches!(stdlib, InstallState::Installed));
+        assert!(matches!(
+            detect_state(&Detect::PythonModule("definitely_not_a_real_module_xyz")),
+            InstallState::NotInstalled
+        ));
+    }
 
-        unsafe {
-            std::env::set_var("PATH", original_path);
+    #[test]
+    fn resolve_python_only_accepts_supported_versions() {
+        // Whatever it returns must be a real interpreter reporting 3.10-3.13.
+        if let Some(py) = resolve_python() {
+            let v = python_minor(&py.program, &py.prefix).expect("resolved interpreter must report a version");
+            assert!((310..=313).contains(&v), "resolve_python returned unsupported {v}");
         }
     }
 
@@ -648,7 +757,7 @@ mod tests {
                 assert!(!plan.steps.is_empty(), "{} has an agent plan with zero steps", entry.id);
                 for step in plan.steps {
                     assert!(
-                        matches!(step.program, "claude" | "npx" | "pip" | "crawl4ai-setup"),
+                        matches!(step.program, "claude" | "npx" | "python"),
                         "{} uses an unexpected program \"{}\" -- shell_command's Windows .cmd handling has only been verified for these",
                         entry.id,
                         step.program
