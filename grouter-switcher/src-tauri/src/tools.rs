@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::process::Stdio;
+use std::time::Duration;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
@@ -100,7 +101,7 @@ pub async fn detect_installations() -> HashMap<String, ToolInstallStatus> {
 }
 
 #[derive(Serialize, Clone)]
-struct ToolLogPayload {
+pub(crate) struct ToolLogPayload {
     tool: String,
     line: String,
 }
@@ -111,6 +112,16 @@ pub(crate) struct ToolLogDonePayload {
     pub success: bool,
     #[serde(rename = "exitCode")]
     pub exit_code: Option<i32>,
+}
+
+pub(crate) fn emit_tool_log(app: &AppHandle, tool_id: &str, line: impl Into<String>) {
+    let _ = app.emit(
+        "tool-log",
+        ToolLogPayload {
+            tool: tool_id.to_string(),
+            line: line.into(),
+        },
+    );
 }
 
 /// npm (and some of these CLIs' own installers) ship as `.cmd` shims on
@@ -136,8 +147,9 @@ pub(crate) fn shell_command(program: &str, args: &[&str]) -> Command {
     }
 }
 
-/// Runs a command to completion, forwarding each stdout/stderr line to the
-/// frontend as a `tool-log` event as it arrives.
+/// Runs a command to completion, forwarding stdout/stderr and a heartbeat to
+/// the frontend. The heartbeat makes silent CLIs visible instead of leaving an
+/// empty "Installing" state while a download or git operation is in progress.
 pub(crate) async fn run_streamed(app: &AppHandle, tool_id: &str, mut cmd: Command) -> Result<(bool, Option<i32>), AppError> {
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
@@ -164,13 +176,28 @@ pub(crate) async fn run_streamed(app: &AppHandle, tool_id: &str, mut cmd: Comman
     });
     drop(tx);
 
-    while let Some(line) = rx.recv().await {
-        let _ = app.emit("tool-log", ToolLogPayload { tool: tool_id.to_string(), line });
+    let mut child_wait = Box::pin(child.wait());
+    let mut heartbeat = tokio::time::interval(Duration::from_secs(10));
+    let mut output_open = true;
+    heartbeat.tick().await;
+    let status = loop {
+        tokio::select! {
+            maybe_line = rx.recv(), if output_open => {
+                match maybe_line {
+                    Some(line) => emit_tool_log(app, tool_id, line),
+                    None => output_open = false,
+                }
+            }
+            result = &mut child_wait => break result.map_err(|e| AppError::Io(e.to_string()))?,
+            _ = heartbeat.tick() => emit_tool_log(app, tool_id, "Still running; waiting for the installer to finish..."),
+        }
+    };
+    while let Ok(line) = rx.try_recv() {
+        emit_tool_log(app, tool_id, line);
     }
-    let _ = out_task.await;
-    let _ = err_task.await;
+    out_task.abort();
+    err_task.abort();
 
-    let status = child.wait().await.map_err(|e| AppError::Io(e.to_string()))?;
     Ok((status.success(), status.code()))
 }
 

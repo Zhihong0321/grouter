@@ -7,7 +7,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter};
 
 use crate::error::AppError;
-use crate::tools::{run_streamed, shell_command, ToolLogDonePayload};
+use crate::tools::{emit_tool_log, run_streamed, shell_command, ToolLogDonePayload};
 
 /// A single shell step, run via `shell_command` (handles Windows .cmd shims
 /// for npm/npx/claude the same way tools.rs does for the CLI installers).
@@ -136,7 +136,7 @@ static ENTRIES: &[MarketplaceEntry] = &[
         claude: Some(AgentPlan {
             steps: &[Step {
                 program: "npx",
-                args: &["skills", "add", "crafter-station/skills", "--skill", "intent-layer", "-g", "-a", "claude-code", "--yes"],
+                args: &["skills", "add", "crafter-station/skills/context-engineering", "--skill", "intent-layer", "-g", "-a", "claude-code", "--yes"],
             }],
             detect: Detect::SkillDir { agent: "claude", skill: "intent-layer" },
         }),
@@ -324,38 +324,52 @@ pub fn detect_marketplace_status() -> HashMap<String, MarketplaceStatus> {
 /// Runs an entry's install plan for one agent step by step, streaming output
 /// over the same `tool-log`/`tool-log-done` events tools.rs uses (tagged
 /// `marketplace:<id>:<agent>` so the frontend can tell the streams apart).
-/// Two distinct error-reporting paths, deliberately not both at once:
-/// - A step that never got to run (bad id/agent, or the required binary
-///   isn't on PATH) reports only through the returned `Err` -- there's no
-///   log content yet, so a `tool-log-done` event here would show "see log
-///   below" over an empty log. The frontend's install-call catch handler is
-///   the single source of truth for this case.
-/// - A step that actually ran and failed reports only through the
-///   `tool-log-done` event (success: false) with real stdout/stderr already
-///   in the log, mirroring tools.rs's install_tool.
+/// Every outcome writes a visible explanation before sending completion. A
+/// successful process exit is not enough: the expected installed artifact
+/// must be present before the UI can call the install successful.
 #[tauri::command]
 pub async fn install_marketplace_entry(app: AppHandle, id: String, agent: String) -> Result<(), AppError> {
     let entry = entry_for(&id)?;
     let plan = plan_for(entry, &agent)?;
     let log_id = format!("marketplace:{id}:{agent}");
 
-    for step in plan.steps {
+    let step_count = plan.steps.len();
+    emit_tool_log(&app, &log_id, format!("Preparing {agent} install for {}...", entry.label));
+
+    for (index, step) in plan.steps.iter().enumerate() {
         if which::which(step.program).is_err() {
             let message = if step.program == "claude" {
                 "Claude Code CLI is not installed -- install it from the Tools tab first".to_string()
             } else {
                 format!("\"{}\" is not on PATH", step.program)
             };
-            return Err(AppError::NotFound(message));
+            emit_tool_log(&app, &log_id, format!("Cannot start step {} of {step_count}: {message}", index + 1));
+            let _ = app.emit("tool-log-done", ToolLogDonePayload { tool: log_id, success: false, exit_code: None });
+            return Ok(());
         }
+        let command = std::iter::once(step.program)
+            .chain(step.args.iter().copied())
+            .collect::<Vec<_>>()
+            .join(" ");
+        emit_tool_log(&app, &log_id, format!("Step {} of {step_count}: {command}", index + 1));
         let cmd = shell_command(step.program, step.args);
         let (success, exit_code) = run_streamed(&app, &log_id, cmd).await?;
         if !success {
+            emit_tool_log(&app, &log_id, format!("Step {} failed (exit code {}).", index + 1, exit_code.map_or("unknown".to_string(), |code| code.to_string())));
             let _ = app.emit("tool-log-done", ToolLogDonePayload { tool: log_id, success: false, exit_code });
             return Ok(());
         }
+        emit_tool_log(&app, &log_id, format!("Step {} completed.", index + 1));
     }
 
+    emit_tool_log(&app, &log_id, "Verifying the expected installation files...");
+    if detect_state(&plan.detect) != InstallState::Installed {
+        emit_tool_log(&app, &log_id, "The installer exited successfully, but the expected files were not found. Installation was not completed.");
+        let _ = app.emit("tool-log-done", ToolLogDonePayload { tool: log_id, success: false, exit_code: Some(0) });
+        return Ok(());
+    }
+
+    emit_tool_log(&app, &log_id, "Verified installed successfully.");
     let _ = app.emit("tool-log-done", ToolLogDonePayload { tool: log_id, success: true, exit_code: Some(0) });
     Ok(())
 }

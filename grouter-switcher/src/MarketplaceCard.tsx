@@ -31,17 +31,26 @@ function AgentInstallRow({
   const [logLines, setLogLines] = useState<string[]>([]);
   const [logOpen, setLogOpen] = useState(false);
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const logEndRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (logOpen) logEndRef.current?.scrollIntoView({ block: "nearest" });
   }, [logLines, logOpen]);
 
+  useEffect(() => {
+    if (!running) return;
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000)), 1000);
+    return () => window.clearInterval(timer);
+  }, [running]);
+
   async function run() {
     setRunning(true);
     setLogLines([]);
     setLogOpen(true);
     setResult(null);
+    setElapsedSeconds(0);
     const stop = await listenMarketplaceLog(
       entryId,
       agent,
@@ -77,18 +86,25 @@ function AgentInstallRow({
       </div>
       <div className="tool-card-actions">
         <button className="btn-secondary" onClick={() => void run()} disabled={running}>
-          {running ? "Working..." : state === "installed" ? "Reinstall / Update" : "Install"}
+          {running ? "Installing..." : state === "installed" ? "Reinstall / Update" : "Install"}
         </button>
-        {logLines.length > 0 && (
+        {(running || logLines.length > 0) && (
           <button className="btn-link btn-link-inline" onClick={() => setLogOpen((v) => !v)}>
-            {logOpen ? "Hide log" : "Show log"}
+            {logOpen ? "Hide details" : "Show details"}
           </button>
         )}
       </div>
+      {running && (
+        <div className="marketplace-progress" role="status" aria-live="polite">
+          <span className="marketplace-progress-dot" />
+          <span>Install in progress ({elapsedSeconds}s)</span>
+          <span className="marketplace-progress-detail">{logLines.at(-1) ?? "Starting installer..."}</span>
+        </div>
+      )}
       {result && <div className={result.success ? "hint" : "error"}>{result.message}</div>}
-      {logOpen && logLines.length > 0 && (
+      {logOpen && (
         <pre className="tool-log">
-          {logLines.join("\n")}
+          {logLines.length > 0 ? logLines.join("\n") : "Waiting for installer output..."}
           <div ref={logEndRef} />
         </pre>
       )}

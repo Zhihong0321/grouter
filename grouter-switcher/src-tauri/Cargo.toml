@@ -15,7 +15,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 dirs = "5"
 keyring = "2"
 open = "5"
-tokio = { version = "1", features = ["sync", "process", "io-util", "rt"] }
+tokio = { version = "1", features = ["sync", "process", "io-util", "rt", "time", "macros"] }
 which = "6"
 
 [profile.release]
