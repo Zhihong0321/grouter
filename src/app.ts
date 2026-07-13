@@ -12,6 +12,7 @@ import { SettingsCache } from "./lib/settings.js";
 import { RouterCache } from "./lib/router.js";
 import { RedisSessionStore } from "./lib/sessionStore.js";
 import { migrateLegacySubrouter } from "./lib/legacyMigration.js";
+import { scheduleSupplierActivitySync } from "./lib/supplierActivitySchedule.js";
 import { env } from "./config/env.js";
 
 import healthRoutes from "./routes/health.js";
@@ -92,6 +93,7 @@ export async function buildApp() {
   await app.register(tierRoutingRoutes);
   await app.register(supplierSyncRoutes);
   await app.register(clientAccountsRoutes);
+  scheduleSupplierActivitySync(app);
 
   // dashboard/dist only exists after `pnpm build:dashboard` has run. Guard so
   // the backend (and tests, and `pnpm dev`) still work standalone before

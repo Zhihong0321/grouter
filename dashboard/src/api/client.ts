@@ -355,6 +355,20 @@ export interface SupplierActivitySyncResultDto {
   reconciliationMatched: true;
   quotaUnits: string;
   tokenCount: string;
+  matchedUsageCount: number;
+}
+
+export interface SupplierProfitByKeyDto {
+  keyId: string;
+  keyName: string;
+  keyPrefix: string;
+  username: string | null;
+  matchedRequestCount: string;
+  pendingMatchCount: string;
+  actualQuotaUnits: string;
+  actualCostUsd: string;
+  customerRevenueUsd: string;
+  grossProfitUsd: string;
 }
 
 export interface RequestLogDto {
@@ -444,6 +458,7 @@ export const api = {
   smokeTestAllSmartRoutes: () => request<{ tested: number; passed: number; failed: number }>("/smart-routing/smoke-test-all", { method: "POST" }),
   getSupplierActivity: () => request<SupplierActivityDashboardDto>("/supplier-sync/activity"),
   syncSupplierActivity: () => request<SupplierActivitySyncResultDto>("/supplier-sync/activity", { method: "POST" }),
+  getSupplierProfitByKey: () => request<SupplierProfitByKeyDto[]>("/profit/by-key"),
 
   getModelRoutes: (modelId: string) => request<ModelRouteDto[]>(`/models/${modelId}/routes`),
   putModelRoutes: (modelId: string, routes: { providerId: string; upstreamModelId: string; priority: number }[]) =>

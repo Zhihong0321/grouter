@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, type SupplierActivityDashboardDto } from "../api/client.js";
+import { api, type SupplierActivityDashboardDto, type SupplierProfitByKeyDto } from "../api/client.js";
 
 function usd(value: string | number | null | undefined): string {
   return `$${Number(value ?? 0).toFixed(4)}`;
@@ -11,13 +11,19 @@ function integer(value: string | number | null | undefined): string {
 
 export default function SupplierActivityPage() {
   const [data, setData] = useState<SupplierActivityDashboardDto | null>(null);
+  const [profitRows, setProfitRows] = useState<SupplierProfitByKeyDto[]>([]);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
   const load = () => {
     setError(null);
-    return api.getSupplierActivity().then(setData).catch((err) => setError(err instanceof Error ? err.message : "Failed to load supplier activity"));
+    return Promise.all([api.getSupplierActivity(), api.getSupplierProfitByKey()])
+      .then(([activity, profit]) => {
+        setData(activity);
+        setProfitRows(profit);
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load supplier activity"));
   };
 
   useEffect(() => { load(); }, []);
@@ -28,7 +34,7 @@ export default function SupplierActivityPage() {
     setSyncing(true);
     try {
       const result = await api.syncSupplierActivity();
-      setMessage(`Synced ${result.fetchedCount} supplier records; ${result.importedCount} new records stored. Totals reconciled.`);
+      setMessage(`Synced ${result.fetchedCount} supplier records; ${result.importedCount} new records stored; ${result.matchedUsageCount} customer usage rows linked to actual supplier cost.`);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Supplier activity sync failed");
@@ -67,6 +73,28 @@ export default function SupplierActivityPage() {
           </p>
         ) : <p style={{ color: "#9aa4b2" }}>Not synchronized yet.</p>}
         {data?.account && <p style={{ color: "#9aa4b2", fontSize: 13 }}>Supplier requests: {integer(data.account.requestCount)} · account snapshot: {new Date(data.account.lastFetchedAt).toLocaleString()}</p>}
+      </div>
+
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>Actual supplier cost by customer key</h3>
+        <p style={{ color: "#9aa4b2" }}>Actual cost is SubRouter quota charged to us. Retail revenue remains separate, so gross profit is revenue minus supplier cost.</p>
+        <table>
+          <thead><tr><th>User</th><th>API key</th><th>Matched calls</th><th>Actual cost</th><th>Revenue</th><th>Gross profit</th><th>Pending</th></tr></thead>
+          <tbody>
+            {profitRows.map((row) => (
+              <tr key={row.keyId}>
+                <td>{row.username ?? "—"}</td>
+                <td>{row.keyName} <span style={{ color: "#9aa4b2" }}>…{row.keyPrefix.slice(-6)}</span></td>
+                <td>{integer(row.matchedRequestCount)}</td>
+                <td>{usd(row.actualCostUsd)}</td>
+                <td>{usd(row.customerRevenueUsd)}</td>
+                <td style={{ color: Number(row.grossProfitUsd) < 0 ? "#ff8080" : "#7ee787" }}>{usd(row.grossProfitUsd)}</td>
+                <td>{integer(row.pendingMatchCount)}</td>
+              </tr>
+            ))}
+            {profitRows.length === 0 && <tr><td colSpan={7} style={{ color: "#9aa4b2" }}>No customer keys found.</td></tr>}
+          </tbody>
+        </table>
       </div>
 
       <div className="card">

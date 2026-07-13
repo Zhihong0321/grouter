@@ -7,6 +7,7 @@ import {
   SubRouterClient,
   SubRouterError,
 } from "./subrouterClient.js";
+import { reconcileSupplierUsage } from "./supplierUsageReconciliation.js";
 
 const SUPPLIER = "subrouter";
 const PAGE_SIZE = 100;
@@ -41,6 +42,7 @@ export interface SupplierSyncResult {
   reconciliationMatched: true;
   quotaUnits: string;
   tokenCount: string;
+  matchedUsageCount: number;
 }
 
 export interface MappedActivity {
@@ -424,6 +426,11 @@ export async function syncAllSupplierActivity(options: SupplierSyncOptions): Pro
       throw error;
     }
 
+    // Supplier activity is now durable and reconciled against the supplier's
+    // own totals. Link it to customer usage only after that succeeds, so an
+    // actual-cost record never points at a partial supplier import.
+    const usageReconciliation = await reconcileSupplierUsage(options.pg);
+
     return {
       supplier: SUPPLIER,
       cutoff,
@@ -433,6 +440,7 @@ export async function syncAllSupplierActivity(options: SupplierSyncOptions): Pro
       reconciliationMatched: true,
       quotaUnits: stats.quota,
       tokenCount: stats.token,
+      matchedUsageCount: usageReconciliation.matchedCount,
     };
   } catch (error) {
     if (!(error instanceof SupplierSyncError && error.type === "already_running")) {

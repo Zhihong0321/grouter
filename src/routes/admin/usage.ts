@@ -57,6 +57,52 @@ const usageRoutes: FastifyPluginAsync = async (app) => {
     );
     return rows[0];
   });
+
+  // Cost of goods sold is based only on the activity record SubRouter charged
+  // us for. Retail cost_cents is intentionally kept separate as revenue.
+  app.get("/admin/api/profit/by-key", async () => {
+    const { rows } = await app.pg.query(
+      `SELECT
+         k.id AS key_id,
+         k.name AS key_name,
+         k.key_prefix,
+         ca.username,
+         COUNT(usage_match.usage_log_id)::text AS matched_request_count,
+         COALESCE(SUM(activity.quota_units), 0)::text AS actual_quota_units,
+         COALESCE(SUM(activity.wallet_cost_usd), 0)::text AS actual_cost_usd,
+         (COALESCE(SUM(usage.cost_cents), 0) / 100)::text AS customer_revenue_usd,
+         ((COALESCE(SUM(usage.cost_cents), 0) / 100) - COALESCE(SUM(activity.wallet_cost_usd), 0))::text AS gross_profit_usd,
+         (
+           SELECT COUNT(*)::text
+           FROM reseller_usage_logs pending
+           LEFT JOIN reseller_usage_supplier_matches pending_match ON pending_match.usage_log_id = pending.id
+           WHERE pending.key_id = k.id AND pending_match.usage_log_id IS NULL
+         ) AS pending_match_count
+       FROM reseller_api_keys k
+       LEFT JOIN reseller_client_accounts ca ON ca.id = k.account_id
+       LEFT JOIN (
+         reseller_usage_supplier_matches usage_match
+         JOIN reseller_usage_logs usage ON usage.id = usage_match.usage_log_id
+         JOIN reseller_supplier_activity activity ON activity.id = usage_match.supplier_activity_id
+       ) ON usage.key_id = k.id
+       WHERE k.deleted_at IS NULL
+       GROUP BY k.id, ca.username
+       ORDER BY COALESCE(SUM(activity.wallet_cost_usd), 0) DESC, k.created_at ASC`,
+    );
+
+    return rows.map((row) => ({
+      keyId: row.key_id,
+      keyName: row.key_name,
+      keyPrefix: row.key_prefix,
+      username: row.username,
+      matchedRequestCount: row.matched_request_count,
+      pendingMatchCount: row.pending_match_count,
+      actualQuotaUnits: row.actual_quota_units,
+      actualCostUsd: row.actual_cost_usd,
+      customerRevenueUsd: row.customer_revenue_usd,
+      grossProfitUsd: row.gross_profit_usd,
+    }));
+  });
 };
 
 export default usageRoutes;
