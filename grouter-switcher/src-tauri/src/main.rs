@@ -41,6 +41,8 @@ fn main() {
             marketplace::list_marketplace_entries,
             marketplace::detect_marketplace_status,
             marketplace::install_marketplace_entry,
+            marketplace::enable_bundled_skill,
+            marketplace::disable_bundled_skill,
         ])
         .run(tauri::generate_context!())
         .expect("error while running grouter-switcher");

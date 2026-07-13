@@ -112,6 +112,57 @@ function AgentInstallRow({
   );
 }
 
+// Bundled entries install by copying vendored skill files -- a synchronous,
+// offline command that either succeeds or returns an error. No log stream, no
+// heartbeat, nothing that can stall: just Enable / Disable.
+function BundledAgentRow({
+  entryId,
+  agent,
+  state,
+  onChanged,
+}: {
+  entryId: string;
+  agent: MarketplaceAgent;
+  state: InstallState;
+  onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const installed = state === "installed";
+
+  async function toggle() {
+    setBusy(true);
+    setError(null);
+    try {
+      if (installed) {
+        await api.disableBundledSkill(entryId, agent);
+      } else {
+        await api.enableBundledSkill(entryId, agent);
+      }
+      onChanged();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="marketplace-agent-row">
+      <div className="marketplace-agent-head">
+        <span className="marketplace-agent-label">{AGENT_LABEL[agent]}</span>
+        <span className={installed ? "pill pill-ok" : "pill pill-off"}>{installed ? "Enabled" : "Not enabled"}</span>
+      </div>
+      <div className="tool-card-actions">
+        <button className="btn-secondary" onClick={() => void toggle()} disabled={busy}>
+          {busy ? (installed ? "Disabling..." : "Enabling...") : installed ? "Disable" : "Enable"}
+        </button>
+      </div>
+      {error && <div className="error">{error}</div>}
+    </div>
+  );
+}
+
 interface MarketplaceCardProps {
   entry: MarketplaceEntryInfo;
   claudeState: InstallState;
@@ -158,9 +209,12 @@ export function MarketplaceCard({ entry, claudeState, codexState, onInstalled }:
             ))}
           </div>
         )}
-        {availableAgents.length > 0 && (
-          <AgentInstallRow key={selectedAgent} entryId={entry.id} agent={selectedAgent} state={activeState} onInstalled={onInstalled} />
-        )}
+        {availableAgents.length > 0 &&
+          (entry.bundled ? (
+            <BundledAgentRow key={selectedAgent} entryId={entry.id} agent={selectedAgent} state={activeState} onChanged={onInstalled} />
+          ) : (
+            <AgentInstallRow key={selectedAgent} entryId={entry.id} agent={selectedAgent} state={activeState} onInstalled={onInstalled} />
+          ))}
         {!entry.codexSupported && entry.codexNote && <p className="hint">{entry.codexNote}</p>}
       </div>
     </div>

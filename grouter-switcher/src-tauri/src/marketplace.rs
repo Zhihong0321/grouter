@@ -1,13 +1,53 @@
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use include_dir::{include_dir, Dir};
 use serde::Serialize;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter};
 
 use crate::error::AppError;
 use crate::tools::{emit_tool_log, run_streamed, shell_command, ToolLogDonePayload};
+
+/// Skill files vendored into the repo and compiled straight into the binary.
+/// Bundling this way means "install" is a local file copy -- no npx/pip/claude
+/// CLI, no network, no PATH, no interactive prompts, no streamed output that can
+/// stall. Enable writes the folders, disable removes them; that's the whole
+/// mechanism. See `resources/skills/`.
+static BUNDLED_SKILLS: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/resources/skills");
+
+/// A marketplace entry whose install is just "drop these skill folders into the
+/// agent's skills dir". `dirs` are folder names that must exist under
+/// `resources/skills/` (and become `~/.<agent>/skills/<dir>`); `agents` lists
+/// which agents can receive them.
+struct BundledPlan {
+    dirs: &'static [&'static str],
+    agents: &'static [&'static str],
+}
+
+impl BundledPlan {
+    fn supports(&self, agent: &str) -> bool {
+        self.agents.contains(&agent)
+    }
+}
+
+/// Recursively writes an embedded skill dir out under `skills_root`. Each
+/// embedded file's path already carries its top-level skill-folder name (e.g.
+/// `intent-layer/SKILL.md`), so joining onto `skills_root` reproduces the tree.
+fn extract_dir(dir: &Dir, skills_root: &Path) -> std::io::Result<()> {
+    for file in dir.files() {
+        let dest = skills_root.join(file.path());
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(dest, file.contents())?;
+    }
+    for sub in dir.dirs() {
+        extract_dir(sub, skills_root)?;
+    }
+    Ok(())
+}
 
 /// A single shell step, run via `shell_command` (handles Windows .cmd shims
 /// for npm/npx/claude the same way tools.rs does for the CLI installers).
@@ -27,7 +67,10 @@ enum Detect {
     /// guessed, since the exact schema isn't publicly documented.
     ClaudePlugin { marketplace: &'static str, plugin: &'static str },
     /// `npx skills add -g -a <agent>` places skills at ~/.<agent>/skills/<name>
-    /// per the skills CLI's documented global-install convention.
+    /// per the skills CLI's documented global-install convention. Currently
+    /// unused -- the skill-based entries now ship bundled -- but kept as the
+    /// detection vocabulary for any future shell-installed skill entry.
+    #[allow(dead_code)]
     SkillDir { agent: &'static str, skill: &'static str },
     /// For plain pip-installed CLIs (not a Claude/Codex plugin at all):
     /// a console_scripts entry point landing on PATH is the install signal.
@@ -46,6 +89,9 @@ struct MarketplaceEntry {
     source_url: &'static str,
     windows: bool,
     mac: bool,
+    /// When set, this entry installs by copying vendored skill folders rather
+    /// than running an installer; `claude`/`codex` are then unused.
+    bundle: Option<BundledPlan>,
     claude: Option<AgentPlan>,
     codex: Option<AgentPlan>,
     /// Shown when an agent isn't automated here but the upstream project
@@ -61,6 +107,7 @@ static ENTRIES: &[MarketplaceEntry] = &[
         source_url: "https://github.com/affaan-m/ECC",
         windows: true,
         mac: true,
+        bundle: None,
         claude: Some(AgentPlan {
             steps: &[
                 Step { program: "claude", args: &["plugin", "marketplace", "add", "https://github.com/affaan-m/ECC"] },
@@ -80,6 +127,7 @@ static ENTRIES: &[MarketplaceEntry] = &[
         source_url: "https://github.com/anthropics/claude-plugins-official",
         windows: true,
         mac: true,
+        bundle: None,
         claude: Some(AgentPlan {
             steps: &[Step { program: "claude", args: &["plugin", "marketplace", "add", "anthropics/claude-plugins-official"] }],
             detect: Detect::ClaudeMarketplace("claude-plugins-official"),
@@ -94,6 +142,7 @@ static ENTRIES: &[MarketplaceEntry] = &[
         source_url: "https://github.com/obra/superpowers-marketplace",
         windows: true,
         mac: true,
+        bundle: None,
         claude: Some(AgentPlan {
             steps: &[
                 Step { program: "claude", args: &["plugin", "marketplace", "add", "obra/superpowers-marketplace"] },
@@ -113,17 +162,22 @@ static ENTRIES: &[MarketplaceEntry] = &[
         source_url: "https://github.com/JuliusBrussee/caveman",
         windows: true,
         mac: true,
-        claude: Some(AgentPlan {
-            steps: &[
-                Step { program: "claude", args: &["plugin", "marketplace", "add", "JuliusBrussee/caveman"] },
-                Step { program: "claude", args: &["plugin", "install", "caveman@caveman"] },
+        // Caveman ships as a set of cooperating skills; bundle the whole set and
+        // drop them straight into the agent's skills dir.
+        bundle: Some(BundledPlan {
+            dirs: &[
+                "caveman",
+                "caveman-compress",
+                "caveman-commit",
+                "caveman-review",
+                "caveman-stats",
+                "caveman-help",
+                "cavecrew",
             ],
-            detect: Detect::ClaudePlugin { marketplace: "caveman", plugin: "caveman" },
+            agents: &["claude", "codex"],
         }),
-        codex: Some(AgentPlan {
-            steps: &[Step { program: "npx", args: &["skills", "add", "JuliusBrussee/caveman", "-a", "codex", "--yes"] }],
-            detect: Detect::SkillDir { agent: "codex", skill: "caveman" },
-        }),
+        claude: None,
+        codex: None,
         codex_note: None,
     },
     MarketplaceEntry {
@@ -133,13 +187,8 @@ static ENTRIES: &[MarketplaceEntry] = &[
         source_url: "https://github.com/crafter-station/skills/tree/main/context-engineering/intent-layer",
         windows: true,
         mac: true,
-        claude: Some(AgentPlan {
-            steps: &[Step {
-                program: "npx",
-                args: &["skills", "add", "crafter-station/skills/context-engineering", "--skill", "intent-layer", "-g", "-a", "claude-code", "--yes"],
-            }],
-            detect: Detect::SkillDir { agent: "claude", skill: "intent-layer" },
-        }),
+        bundle: Some(BundledPlan { dirs: &["intent-layer"], agents: &["claude"] }),
+        claude: None,
         codex: None,
         codex_note: Some("This skill targets Claude Code specifically per its own docs; no Codex install path is published."),
     },
@@ -150,6 +199,7 @@ static ENTRIES: &[MarketplaceEntry] = &[
         source_url: "https://github.com/unclecode/crawl4ai",
         windows: true,
         mac: true,
+        bundle: None,
         claude: Some(AgentPlan {
             steps: &[
                 Step { program: "pip", args: &["install", "-U", "crawl4ai"] },
@@ -268,6 +318,36 @@ fn detect_state(detect: &Detect) -> InstallState {
     }
 }
 
+/// A bundled entry counts as installed only when *every* one of its skill
+/// folders is present in the agent's skills dir; anything less is treated as
+/// not installed so Enable re-writes the full set (the copy is idempotent).
+fn bundled_state(plan: &BundledPlan, agent: &str) -> InstallState {
+    let root = agent_config_dir(agent).join("skills");
+    if plan.dirs.iter().all(|d| root.join(d).exists()) {
+        InstallState::Installed
+    } else {
+        InstallState::NotInstalled
+    }
+}
+
+/// Resolves an entry's state for one agent, preferring the bundled mechanism
+/// when the entry has one for that agent and falling back to the shell plan.
+fn agent_state(entry: &MarketplaceEntry, agent: &str) -> InstallState {
+    if let Some(plan) = entry.bundle.as_ref().filter(|p| p.supports(agent)) {
+        return bundled_state(plan, agent);
+    }
+    let shell_plan = match agent {
+        "claude" => entry.claude.as_ref(),
+        "codex" => entry.codex.as_ref(),
+        _ => None,
+    };
+    shell_plan.map(|p| detect_state(&p.detect)).unwrap_or(InstallState::Unsupported)
+}
+
+fn bundle_supports(entry: &MarketplaceEntry, agent: &str) -> bool {
+    entry.bundle.as_ref().is_some_and(|p| p.supports(agent))
+}
+
 #[derive(Serialize)]
 pub struct MarketplaceEntryInfo {
     pub id: String,
@@ -283,6 +363,9 @@ pub struct MarketplaceEntryInfo {
     pub codex_supported: bool,
     #[serde(rename = "codexNote")]
     pub codex_note: Option<String>,
+    /// True when this entry installs by copying vendored skill files -- the UI
+    /// shows an Enable/Disable toggle instead of an installer with a log stream.
+    pub bundled: bool,
 }
 
 #[tauri::command]
@@ -296,9 +379,10 @@ pub fn list_marketplace_entries() -> Vec<MarketplaceEntryInfo> {
             source_url: e.source_url.to_string(),
             windows: e.windows,
             mac: e.mac,
-            claude_supported: e.claude.is_some(),
-            codex_supported: e.codex.is_some(),
+            claude_supported: e.claude.is_some() || bundle_supports(e, "claude"),
+            codex_supported: e.codex.is_some() || bundle_supports(e, "codex"),
             codex_note: e.codex_note.map(|s| s.to_string()),
+            bundled: e.bundle.is_some(),
         })
         .collect()
 }
@@ -314,8 +398,8 @@ pub fn detect_marketplace_status() -> HashMap<String, MarketplaceStatus> {
     ENTRIES
         .iter()
         .map(|e| {
-            let claude = e.claude.as_ref().map(|p| detect_state(&p.detect)).unwrap_or(InstallState::Unsupported);
-            let codex = e.codex.as_ref().map(|p| detect_state(&p.detect)).unwrap_or(InstallState::Unsupported);
+            let claude = agent_state(e, "claude");
+            let codex = agent_state(e, "codex");
             (e.id.to_string(), MarketplaceStatus { claude, codex })
         })
         .collect()
@@ -371,6 +455,57 @@ pub async fn install_marketplace_entry(app: AppHandle, id: String, agent: String
 
     emit_tool_log(&app, &log_id, "Verified installed successfully.");
     let _ = app.emit("tool-log-done", ToolLogDonePayload { tool: log_id, success: true, exit_code: Some(0) });
+    Ok(())
+}
+
+fn bundle_for<'a>(entry: &'a MarketplaceEntry, agent: &str) -> Result<&'a BundledPlan, AppError> {
+    entry
+        .bundle
+        .as_ref()
+        .filter(|p| p.supports(agent))
+        .ok_or_else(|| AppError::NotFound(format!("No bundled {agent} skill for \"{}\"", entry.id)))
+}
+
+/// Installs a bundled entry by writing its vendored skill folders into the
+/// agent's skills dir. Synchronous and offline -- returns Ok only when every
+/// folder has actually been written, so the UI never shows a false success.
+#[tauri::command]
+pub fn enable_bundled_skill(id: String, agent: String) -> Result<(), AppError> {
+    let entry = entry_for(&id)?;
+    let plan = bundle_for(entry, &agent)?;
+    let skills_root = agent_config_dir(&agent).join("skills");
+
+    for dir_name in plan.dirs {
+        let src = BUNDLED_SKILLS
+            .get_dir(dir_name)
+            .ok_or_else(|| AppError::NotFound(format!("Bundled skill \"{dir_name}\" is missing from this build")))?;
+        // Replace any prior copy so a re-enable can't leave stale files behind.
+        let dest = skills_root.join(dir_name);
+        if dest.exists() {
+            fs::remove_dir_all(&dest).map_err(|e| AppError::Io(e.to_string()))?;
+        }
+        extract_dir(src, &skills_root).map_err(|e| AppError::Io(e.to_string()))?;
+    }
+
+    if bundled_state(plan, &agent) != InstallState::Installed {
+        return Err(AppError::Io("Skill files were written but could not be verified on disk".to_string()));
+    }
+    Ok(())
+}
+
+/// Removes a bundled entry's skill folders from the agent's skills dir.
+#[tauri::command]
+pub fn disable_bundled_skill(id: String, agent: String) -> Result<(), AppError> {
+    let entry = entry_for(&id)?;
+    let plan = bundle_for(entry, &agent)?;
+    let skills_root = agent_config_dir(&agent).join("skills");
+
+    for dir_name in plan.dirs {
+        let dest = skills_root.join(dir_name);
+        if dest.exists() {
+            fs::remove_dir_all(&dest).map_err(|e| AppError::Io(e.to_string()))?;
+        }
+    }
     Ok(())
 }
 
@@ -491,7 +626,11 @@ mod tests {
     #[test]
     fn every_entry_has_at_least_one_automated_agent_and_well_formed_steps() {
         for entry in ENTRIES {
-            assert!(entry.claude.is_some() || entry.codex.is_some(), "{} has no automated install path at all", entry.id);
+            assert!(
+                entry.claude.is_some() || entry.codex.is_some() || entry.bundle.is_some(),
+                "{} has no automated install path at all",
+                entry.id
+            );
             for plan in [&entry.claude, &entry.codex].into_iter().flatten() {
                 assert!(!plan.steps.is_empty(), "{} has an agent plan with zero steps", entry.id);
                 for step in plan.steps {
@@ -512,5 +651,70 @@ mod tests {
         let ecc = entry_for("ecc").unwrap();
         assert!(plan_for(ecc, "codex").is_err()); // ECC has no automated codex plan
         assert!(plan_for(ecc, "claude").is_ok());
+    }
+
+    #[test]
+    fn every_bundled_dir_is_vendored_with_a_skill_file() {
+        for entry in ENTRIES {
+            let Some(plan) = entry.bundle.as_ref() else { continue };
+            assert!(!plan.dirs.is_empty(), "{} bundles zero folders", entry.id);
+            assert!(!plan.agents.is_empty(), "{} bundles for zero agents", entry.id);
+            for dir in plan.dirs {
+                let vendored = BUNDLED_SKILLS
+                    .get_dir(dir)
+                    .unwrap_or_else(|| panic!("{}: bundled folder \"{dir}\" is not in resources/skills/", entry.id));
+                assert!(
+                    vendored.get_file(format!("{dir}/SKILL.md")).is_some(),
+                    "{}: bundled folder \"{dir}\" has no SKILL.md",
+                    entry.id
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn enable_writes_and_disable_removes_every_bundled_folder() {
+        let _guard = lock_env();
+        let dir = sandbox("bundled-enable");
+        unsafe {
+            std::env::set_var("CLAUDE_CONFIG_DIR", &dir);
+        }
+
+        // Not installed to begin with.
+        assert!(matches!(agent_state(entry_for("caveman").unwrap(), "claude"), InstallState::NotInstalled));
+
+        enable_bundled_skill("caveman".to_string(), "claude".to_string()).unwrap();
+
+        // Every folder landed, each with its SKILL.md, and detection agrees.
+        let plan = entry_for("caveman").unwrap().bundle.as_ref().unwrap();
+        for name in plan.dirs {
+            assert!(dir.join("skills").join(name).join("SKILL.md").exists(), "missing {name}/SKILL.md after enable");
+        }
+        assert!(matches!(agent_state(entry_for("caveman").unwrap(), "claude"), InstallState::Installed));
+
+        // Re-enabling is idempotent (clean overwrite, still Installed).
+        enable_bundled_skill("caveman".to_string(), "claude".to_string()).unwrap();
+        assert!(matches!(agent_state(entry_for("caveman").unwrap(), "claude"), InstallState::Installed));
+
+        disable_bundled_skill("caveman".to_string(), "claude".to_string()).unwrap();
+        for name in plan.dirs {
+            assert!(!dir.join("skills").join(name).exists(), "{name} still present after disable");
+        }
+        assert!(matches!(agent_state(entry_for("caveman").unwrap(), "claude"), InstallState::NotInstalled));
+    }
+
+    #[test]
+    fn intent_layer_extracts_nested_reference_and_script_files() {
+        let _guard = lock_env();
+        let dir = sandbox("bundled-nested");
+        unsafe {
+            std::env::set_var("CLAUDE_CONFIG_DIR", &dir);
+        }
+        enable_bundled_skill("intent-layer".to_string(), "claude".to_string()).unwrap();
+        let base = dir.join("skills").join("intent-layer");
+        assert!(base.join("SKILL.md").exists());
+        // Nested subdirs must come across too, not just the top-level SKILL.md.
+        assert!(base.join("references").join("templates.md").exists());
+        assert!(base.join("scripts").join("detect_state.sh").exists());
     }
 }

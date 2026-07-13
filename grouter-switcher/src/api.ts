@@ -108,6 +108,7 @@ export interface MarketplaceEntryInfo {
   claudeSupported: boolean;
   codexSupported: boolean;
   codexNote: string | null;
+  bundled: boolean;
 }
 
 export type InstallState = "not_installed" | "marketplace_added" | "installed" | "unsupported";
@@ -152,6 +153,10 @@ export const api = {
   detectMarketplaceStatus: () => invoke<MarketplaceStatusResult>("detect_marketplace_status"),
   installMarketplaceEntry: (id: string, agent: MarketplaceAgent) =>
     invoke<void>("install_marketplace_entry", { id, agent }),
+  enableBundledSkill: (id: string, agent: MarketplaceAgent) =>
+    invoke<void>("enable_bundled_skill", { id, agent }),
+  disableBundledSkill: (id: string, agent: MarketplaceAgent) =>
+    invoke<void>("disable_bundled_skill", { id, agent }),
 };
 
 // Subscribes to the streamed install/update output for a single tool,
