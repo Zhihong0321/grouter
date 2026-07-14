@@ -33,6 +33,12 @@ describe("classifyRequestedTier", () => {
     expect(classifyRequestedTier("gpt-5-mini", tiers)).toBe("routine");
     expect(classifyRequestedTier("some-unknown-model", tiers)).toBe("build");
   });
+
+  it("classifies the gpt-5.6 sol/terra/luna fleet by tier suffix, not the gpt-5 prefix", () => {
+    expect(classifyRequestedTier("gpt-5.6-sol", tiers)).toBe("brain");
+    expect(classifyRequestedTier("gpt-5.6-terra", tiers)).toBe("build");
+    expect(classifyRequestedTier("gpt-5.6-luna", tiers)).toBe("routine");
+  });
 });
 
 describe("signalsFromAnthropic", () => {

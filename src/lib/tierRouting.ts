@@ -88,9 +88,13 @@ export function decideTier(
   if (sig.isBackground) return finish("routine", "background");
   if (sig.thinkingEnabled) return finish("brain", "thinking");
   if (sig.inputTokens > cfg.longContextTokens) return finish("brain", "long_context");
-  if (sig.requestedTier === "brain") return finish("brain", "explicit_brain");
   if (cfg.honorExplicitRoutine && sig.requestedTier === "routine") return finish("routine", "explicit_routine");
+  // Cost-saving downgrade: a short, tool-less turn goes to routine even when the
+  // client explicitly asked for brain -- the quality bar for such turns is low.
+  // Genuine brain needs (thinking / long context) already matched above, so
+  // they're never downgraded here.
   if (sig.inputTokens < cfg.shortTurnTokens && !sig.hasTools) return finish("routine", "short_turn");
+  if (sig.requestedTier === "brain") return finish("brain", "explicit_brain");
   return finish("build", "default");
 }
 

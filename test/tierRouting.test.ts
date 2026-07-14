@@ -81,8 +81,16 @@ describe("decideTier", () => {
     expect(decision.chosenTier).toBe("brain");
   });
 
-  it("never silently downgrades an explicit brain-tier ask", () => {
+  it("downgrades even an explicit brain ask on a short, tool-less turn", () => {
     const sig: Signals = { ...baseSignals, requestedTier: "brain", inputTokens: 10, hasTools: false };
+    const decision = decideTier(sig, anthropicTiers, baseConfig, "claude-opus-4-8");
+    expect(decision.ruleId).toBe("short_turn");
+    expect(decision.chosenTier).toBe("routine");
+    expect(decision.wasOverridden).toBe(true);
+  });
+
+  it("keeps an explicit brain ask on brain for a normal (tool-using) turn", () => {
+    const sig: Signals = { ...baseSignals, requestedTier: "brain", inputTokens: 5_000, hasTools: true };
     const decision = decideTier(sig, anthropicTiers, baseConfig, "claude-opus-4-8");
     expect(decision.ruleId).toBe("explicit_brain");
     expect(decision.chosenTier).toBe("brain");

@@ -66,6 +66,12 @@ export function classifyRequestedTier(model: string, tiers: TierModelMap): Tier 
   if (model === tiers.build) return "build";
   if (model === tiers.routine) return "routine";
   const lower = model.toLowerCase();
+  // Fleet-specific tier suffixes (gpt-5.6-sol/terra/luna). These share the
+  // "gpt-5" prefix, so they must be matched before the generic gpt-5 -> brain
+  // rule below or terra/luna would be misclassified as brain.
+  if (/\bluna\b/.test(lower)) return "routine";
+  if (/\bterra\b/.test(lower)) return "build";
+  if (/\bsol\b/.test(lower)) return "brain";
   // Check routine suffixes first: "gpt-5-mini"/"o1-mini" would otherwise also
   // match the "gpt-5"/"o1" brain prefix below.
   if (/\bhaiku\b|\bmini\b|\bnano\b/.test(lower)) return "routine";

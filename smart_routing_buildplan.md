@@ -179,9 +179,11 @@ Ordered rules (first match wins):
 2. `isBackground` → routine
 3. `thinkingEnabled` → brain
 4. `inputTokens > longContextTokens` → brain
-5. `requestedTier === "brain"` → brain (never silently downgrade an explicit brain ask)
-6. `honorExplicitRoutine && requestedTier === "routine"` → routine
-7. `inputTokens < shortTurnTokens && !hasTools` → routine
+5. `honorExplicitRoutine && requestedTier === "routine"` → routine
+6. `inputTokens < shortTurnTokens && !hasTools` → routine (short, tool-less turns
+   downgrade **even an explicit brain ask** — genuine brain needs already matched
+   at rules 3–4)
+7. `requestedTier === "brain"` → brain (explicit brain ask on a normal turn)
 8. default → build
 
 **Fallback:** If the chosen model isn't in the catalog or has no active route, fall
