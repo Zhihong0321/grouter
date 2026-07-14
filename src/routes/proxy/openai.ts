@@ -79,6 +79,12 @@ async function handleOpenAiRequest(app: Parameters<FastifyPluginAsync>[0], reque
         }
       }
     }
+    if (decision?.wasOverridden) {
+      request.log.info(
+        { client, requestedModel, chosenModel: model, requestedTier: decision.requestedTier, chosenTier: decision.chosenTier, rule: decision.ruleId },
+        `[Smart Route] ${client}: ${requestedModel} -> ${model} (${decision.requestedTier} -> ${decision.chosenTier}, rule=${decision.ruleId})`,
+      );
+    }
   }
 
   const price = await app.priceCache.get(model);
