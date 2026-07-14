@@ -86,6 +86,10 @@ export interface UsageEntry {
 export interface UsageResult {
   requestCount: number;
   costCents: number;
+  /** Smart-router savings: requested-model cost minus routed-model cost. */
+  savedCents: number;
+  /** How many requests the smart router swapped to a cheaper model. */
+  switchedCount: number;
   inputTokens: number;
   outputTokens: number;
   cacheCreationInputTokens: number;

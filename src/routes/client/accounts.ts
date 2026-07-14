@@ -218,6 +218,19 @@ const clientAccountsRoutes: FastifyPluginAsync = async (app) => {
       [keyRow.id, days],
     );
 
+    // Smart-router savings live in reseller_request_logs (not usage_logs):
+    // sum cost_saved_cents over requests where the engine actually swapped the
+    // model to a cheaper one, for this key over the same window.
+    const { rows: savingsRows } = await app.pg.query(
+      `SELECT
+         COALESCE(SUM(cost_saved_cents), 0) AS saved_cents,
+         COUNT(*) FILTER (WHERE was_overridden) AS switched_count
+       FROM reseller_request_logs
+       WHERE key_id = $1 AND was_overridden = true
+         AND created_at >= now() - ($2 || ' days')::interval`,
+      [keyRow.id, days],
+    );
+
     const { rows: recentRows } = await app.pg.query(
       `SELECT model, input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens, cost_cents, stream, created_at
        FROM reseller_usage_logs
@@ -228,9 +241,12 @@ const clientAccountsRoutes: FastifyPluginAsync = async (app) => {
     );
 
     const summary = summaryRows[0];
+    const savings = savingsRows[0];
     return {
       requestCount: Number(summary.request_count),
       costCents: Number(summary.cost_cents),
+      savedCents: Number(savings.saved_cents),
+      switchedCount: Number(savings.switched_count),
       inputTokens: Number(summary.input_tokens),
       outputTokens: Number(summary.output_tokens),
       cacheCreationInputTokens: Number(summary.cache_creation_input_tokens),

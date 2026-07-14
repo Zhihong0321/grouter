@@ -558,6 +558,13 @@ export default function App() {
                     <div className="stat-value">{usage ? totalTokens.toLocaleString() : "--"}</div>
                     <div className="stat-label">tokens</div>
                   </div>
+                  <div className="stat-card">
+                    <div className="stat-value">{usage ? fmtMoney(usage.savedCents) : "--"}</div>
+                    <div className="stat-label">
+                      smart-router saved
+                      {usage && usage.switchedCount > 0 ? ` (${usage.switchedCount.toLocaleString()} switched)` : ""}
+                    </div>
+                  </div>
                 </div>
 
                 <div className="token-card">

@@ -193,6 +193,12 @@ pub struct UsageResult {
     // Fractional (numeric) -- see UsageEntry::cost_cents.
     #[serde(rename = "costCents")]
     pub cost_cents: f64,
+    // Smart-router savings: what requests would have cost on the requested model
+    // minus what the routed (cheaper) model actually cost. Fractional (numeric).
+    #[serde(rename = "savedCents", default)]
+    pub saved_cents: f64,
+    #[serde(rename = "switchedCount", default)]
+    pub switched_count: i64,
     #[serde(rename = "inputTokens")]
     pub input_tokens: i64,
     #[serde(rename = "outputTokens")]
