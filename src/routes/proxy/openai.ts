@@ -80,6 +80,19 @@ async function handleOpenAiRequest(app: Parameters<FastifyPluginAsync>[0], reque
       }
     }
     if (decision?.wasOverridden) {
+      // When we downgrade to the routine tier, force low reasoning effort so the
+      // cheap model isn't run at an expensive effort the client only intended for
+      // the pricier model it originally asked for (e.g. Codex firing a gpt-5.4-mini
+      // helper call that we reroute to gpt-5.6-luna). Only touches overridden
+      // routine turns; explicit routine requests keep whatever effort they sent.
+      if (decision.chosenTier === "routine") {
+        if (endpoint === "responses") {
+          const existing = body.reasoning;
+          body.reasoning = { ...(existing && typeof existing === "object" && !Array.isArray(existing) ? existing : {}), effort: "low" };
+        } else {
+          body.reasoning_effort = "low";
+        }
+      }
       request.log.info(
         { client, requestedModel, chosenModel: model, requestedTier: decision.requestedTier, chosenTier: decision.chosenTier, rule: decision.ruleId },
         `[Smart Route] ${client}: ${requestedModel} -> ${model} (${decision.requestedTier} -> ${decision.chosenTier}, rule=${decision.ruleId})`,
