@@ -85,12 +85,15 @@ const tierRoutingRoutes: FastifyPluginAsync = async (app) => {
     const { rows } = await app.pg.query(
       `SELECT
          client,
+         requested_model,
+         chosen_model,
          count(*) AS overridden_request_count,
          COALESCE(sum(cost_baseline_cents), 0) AS cost_baseline_cents,
          COALESCE(sum(cost_saved_cents), 0) AS cost_saved_cents
        FROM reseller_request_logs
        WHERE smart_routing_enabled = true AND was_overridden = true
-       GROUP BY client`,
+       GROUP BY client, requested_model, chosen_model
+       ORDER BY sum(cost_saved_cents) DESC NULLS LAST`,
     );
     return rows;
   });

@@ -53,6 +53,8 @@ export interface TierConfigDto {
 
 export interface TierRoutingSavingsDto {
   client: string | null;
+  requested_model: string | null;
+  chosen_model: string | null;
   overridden_request_count: string;
   cost_baseline_cents: string;
   cost_saved_cents: string;

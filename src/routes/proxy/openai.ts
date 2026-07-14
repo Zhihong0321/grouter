@@ -119,6 +119,7 @@ async function handleOpenAiRequest(app: Parameters<FastifyPluginAsync>[0], reque
     smartRoutingEnabled,
     routingMode: tierConfig?.mode,
     requestedTier: decision?.requestedTier,
+    requestedModel,
     chosenModel: model,
     ruleId: decision?.ruleId,
     wasOverridden: decision?.wasOverridden,

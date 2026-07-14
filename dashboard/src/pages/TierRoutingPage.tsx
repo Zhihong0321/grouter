@@ -160,15 +160,17 @@ export default function TierRoutingPage() {
           <thead>
             <tr>
               <th>Client</th>
+              <th>Requested → Served</th>
               <th>Overridden requests</th>
               <th>Baseline cost</th>
               <th>Saved</th>
             </tr>
           </thead>
           <tbody>
-            {savings.map((row) => (
-              <tr key={row.client ?? "unknown"}>
+            {savings.map((row, i) => (
+              <tr key={`${row.client ?? "unknown"}-${row.requested_model ?? "?"}-${row.chosen_model ?? "?"}-${i}`}>
                 <td>{row.client ?? "unknown"}</td>
+                <td>{(row.requested_model ?? "?")} → {(row.chosen_model ?? "?")}</td>
                 <td>{row.overridden_request_count}</td>
                 <td>{centsToDollars(row.cost_baseline_cents)}</td>
                 <td>{centsToDollars(row.cost_saved_cents)}</td>
