@@ -164,7 +164,11 @@ async function handleOpenAiRequest(app: Parameters<FastifyPluginAsync>[0], reque
 
   const computeSavings = async (usage: CapturedUsage): Promise<{ costBaselineCents?: number; costSavedCents?: number }> => {
     if (!decision?.wasOverridden) return {};
-    const baselinePrice = await app.priceCache.get(tierConfig.tiers.openai[decision.requestedTier]);
+    // Baseline = what the client's *actual requested model* would have cost for
+    // the same usage (i.e. what it would have cost with smart routing off), not
+    // the requested tier's model -- otherwise a sol->luna swap whose requested
+    // tier is already routine compares luna vs luna and reports zero savings.
+    const baselinePrice = await app.priceCache.get(requestedModel);
     if (!baselinePrice) return {};
     const costBaselineCents = computeCostCents(usage, baselinePrice).totalCostCents;
     const costSavedCents = Math.max(0, costBaselineCents - computeCostCents(usage, price).totalCostCents);

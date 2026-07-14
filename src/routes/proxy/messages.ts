@@ -163,7 +163,11 @@ const proxyRoutes: FastifyPluginAsync = async (app) => {
     // vs what was actually billed.
     const computeSavings = async (usage: CapturedUsage): Promise<{ costBaselineCents?: number; costSavedCents?: number }> => {
       if (!decision?.wasOverridden || !tierConfig) return {};
-      const baselinePrice = await app.priceCache.get(tierConfig.tiers.anthropic[decision.requestedTier]);
+      // Baseline = what the client's *actual requested model* would have cost for
+      // the same usage (smart routing off), not the requested tier's model, so a
+      // swap whose requested tier already equals the served tier still reports the
+      // real requested-vs-routed price difference.
+      const baselinePrice = await app.priceCache.get(requestedModel);
       if (!baselinePrice) return {};
       const costBaselineCents = computeCostCents(usage, baselinePrice).totalCostCents;
       const costSavedCents = Math.max(0, costBaselineCents - computeCostCents(usage, price).totalCostCents);
