@@ -11,12 +11,15 @@ interface NewProvider {
 const EMPTY: NewProvider = { name: "", baseUrl: "", apiKey: "", standard: "openai" };
 
 // One-click presets fill everything except the key. Base URLs are verified
-// against each provider's live GET /v1/models; MiniMax's single account token
-// serves M3 + M2.7-highspeed, so one provider covers both.
+// against each provider's live endpoints. MiniMax's single account token serves
+// M3 + M2.7-highspeed, so one provider covers both. Note: Xiaomi's Anthropic
+// endpoint serves /v1/messages but has no /v1/models, so "Discover models"
+// only works on its OpenAI preset -- add models manually for the Anthropic one.
 const PRESETS: { label: string; value: Omit<NewProvider, "apiKey"> }[] = [
-  { label: "MiniMax Official", value: { name: "MiniMax Official", baseUrl: "https://api.minimax.io/anthropic", standard: "anthropic" } },
+  { label: "MiniMax (Anthropic)", value: { name: "MiniMax Official", baseUrl: "https://api.minimax.io/anthropic", standard: "anthropic" } },
   { label: "MiniMax (OpenAI)", value: { name: "MiniMax Official", baseUrl: "https://api.minimax.io/v1", standard: "openai" } },
-  { label: "Xiaomi MiMo", value: { name: "Xiaomi MiMo", baseUrl: "https://token-plan-sgp.xiaomimimo.com/v1", standard: "openai" } },
+  { label: "Xiaomi MiMo (Anthropic)", value: { name: "Xiaomi MiMo", baseUrl: "https://token-plan-sgp.xiaomimimo.com/anthropic", standard: "anthropic" } },
+  { label: "Xiaomi MiMo (OpenAI)", value: { name: "Xiaomi MiMo", baseUrl: "https://token-plan-sgp.xiaomimimo.com/v1", standard: "openai" } },
 ];
 
 export default function ProvidersPage() {
