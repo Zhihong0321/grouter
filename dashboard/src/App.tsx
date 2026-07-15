@@ -6,6 +6,7 @@ import KeysListPage from "./pages/KeysListPage.js";
 import KeyDetailPage from "./pages/KeyDetailPage.js";
 import PriceTablePage from "./pages/PriceTablePage.js";
 import RouterPage from "./pages/RouterPage.js";
+import ProvidersPage from "./pages/ProvidersPage.js";
 import LogsPage from "./pages/LogsPage.js";
 import KeyTesterPage from "./pages/KeyTesterPage.js";
 import SupplierActivityPage from "./pages/SupplierActivityPage.js";
@@ -47,6 +48,7 @@ export default function App() {
         <Link to="/keys">Keys</Link>
         <Link to="/prices">Prices</Link>
         <Link to="/router">Router</Link>
+        <Link to="/providers">Providers</Link>
         <Link to="/tester">Key Tester</Link>
         <Link to="/supplier">SubRouter</Link>
         <Link to="/logs">Logs</Link>
@@ -62,6 +64,7 @@ export default function App() {
           <Route path="/keys/:id" element={<KeyDetailPage />} />
           <Route path="/prices" element={<PriceTablePage />} />
           <Route path="/router" element={<RouterPage />} />
+          <Route path="/providers" element={<ProvidersPage />} />
           <Route path="/tester" element={<KeyTesterPage />} />
           <Route path="/supplier" element={<SupplierActivityPage />} />
           <Route path="/logs" element={<LogsPage />} />

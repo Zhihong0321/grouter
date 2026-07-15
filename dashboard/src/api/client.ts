@@ -212,6 +212,14 @@ export interface ProviderDto {
   supplierKeyModelIds: string[] | null;
 }
 
+export interface ProviderDiscoverModelsResultDto {
+  discoveredCount: number;
+  newModelCount: number;
+  routedCount: number;
+  skippedStandardMismatch: string[];
+  modelIds: string[];
+}
+
 export interface ModelRouteDto {
   routeId: string;
   providerId: string;
@@ -452,6 +460,7 @@ export const api = {
   testOpenaiProvider: (id: string) => request<OpenAiEndpointTestResultDto>(`/providers/${id}/test-openai`, { method: "POST" }),
   testOpenaiStreaming: (id: string) => request<OpenAiStreamingTestResultDto>(`/providers/${id}/test-openai-streaming`, { method: "POST" }),
   testProviderModel: (id: string, modelId: string) => request<ProviderModelTestResultDto>(`/providers/${id}/test-model`, { method: "POST", body: JSON.stringify({ modelId }) }),
+  discoverProviderModels: (id: string) => request<ProviderDiscoverModelsResultDto>(`/providers/${id}/discover-models`, { method: "POST" }),
 
   getSupplierKeys: () => request<SupplierKeySyncDto>("/supplier-sync/keys"),
   syncSupplierKeys: () => request<SupplierKeySyncResultDto>("/supplier-sync/keys", { method: "POST" }),

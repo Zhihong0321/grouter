@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import { requireAdmin } from "./auth.js";
 import { encryptKey, decryptKey } from "../../lib/keyCrypto.js";
-import { checkProviderHealth, checkOpenAiEndpoints, checkOpenAiStreaming, checkProviderModel } from "../../lib/upstream.js";
+import { checkProviderHealth, checkOpenAiEndpoints, checkOpenAiStreaming, checkProviderModel, listProviderModels } from "../../lib/upstream.js";
 
 interface CreateProviderBody {
   name: string;
@@ -233,6 +233,108 @@ const providersRoutes: FastifyPluginAsync = async (app) => {
       { standard: provider.standard, baseUrl: provider.base_url, apiKey: decryptKey(provider.api_key_encrypted) },
       modelId,
     );
+  });
+
+  // Auto-detect: GET /v1/models on the provider (zero-cost), then register each
+  // advertised model in the catalog and pair it to this provider as a route.
+  // This is the direct-provider equivalent of SubRouter's smart sync -- MiniMax,
+  // Xiaomi MiMo, and any OpenAI/Anthropic-compatible relay all expose the model
+  // list at data[].id, so one flow discovers + wires them all. It never spends
+  // tokens and never touches models already served by other providers.
+  app.post<{ Params: { id: string } }>("/admin/api/providers/:id/discover-models", async (request, reply) => {
+    const { rows } = await app.pg.query("SELECT * FROM reseller_providers WHERE id = $1", [request.params.id]);
+    if (rows.length === 0) return reply.code(404).send({ error: "Not found" });
+    const provider = rows[0];
+
+    const discovery = await listProviderModels({
+      standard: provider.standard,
+      baseUrl: provider.base_url,
+      apiKey: decryptKey(provider.api_key_encrypted),
+    });
+    if (!discovery.ok) {
+      return reply.code(502).send({ error: discovery.message, statusCode: discovery.statusCode });
+    }
+    if (discovery.modelIds.length === 0) {
+      return reply.code(200).send({ discoveredCount: 0, newModelCount: 0, routedCount: 0, skippedStandardMismatch: [], modelIds: [] });
+    }
+
+    const client = await app.pg.connect();
+    let newModelCount = 0;
+    let routedCount = 0;
+    const skippedStandardMismatch: string[] = [];
+    try {
+      await client.query("BEGIN");
+
+      // A model ID already registered under the OTHER standard can't be served
+      // by this provider (routes require matching standards), so leave it be.
+      const { rows: existingRows } = await client.query<{ model_id: string; standard: "anthropic" | "openai" }>(
+        "SELECT model_id, standard FROM reseller_models WHERE model_id = ANY($1::text[])",
+        [discovery.modelIds],
+      );
+      const existing = new Map(existingRows.map((row) => [row.model_id, row.standard]));
+
+      for (const modelId of discovery.modelIds) {
+        const known = existing.get(modelId);
+        if (known && known !== provider.standard) {
+          skippedStandardMismatch.push(modelId);
+          continue;
+        }
+
+        if (!known) {
+          await client.query(
+            `INSERT INTO reseller_models (model_id, brand, standard, display_name)
+             VALUES ($1, $2, $3, $1)
+             ON CONFLICT (model_id) DO NOTHING`,
+            [modelId, provider.name, provider.standard],
+          );
+          await client.query(
+            `INSERT INTO reseller_model_prices
+               (model_id, input_price_cents_per_million, output_price_cents_per_million, cache_write_price_cents_per_million, cache_read_price_cents_per_million)
+             VALUES ($1, 0, 0, 0, 0)
+             ON CONFLICT (model_id) DO NOTHING`,
+            [modelId],
+          );
+          newModelCount += 1;
+        }
+
+        // Append this provider as a route if it isn't paired yet; a brand-new
+        // model gets priority 1, an existing model gets the next free backup slot.
+        const routeExists = await client.query(
+          "SELECT 1 FROM reseller_model_routes WHERE model_id = $1 AND provider_id = $2",
+          [modelId, provider.id],
+        );
+        if (routeExists.rowCount === 0) {
+          const { rows: maxRows } = await client.query<{ max_priority: number | null }>(
+            "SELECT MAX(priority) AS max_priority FROM reseller_model_routes WHERE model_id = $1",
+            [modelId],
+          );
+          const priority = Number(maxRows[0]?.max_priority ?? 0) + 1;
+          await client.query(
+            `INSERT INTO reseller_model_routes (model_id, provider_id, upstream_model_id, priority, active)
+             VALUES ($1, $2, $3, $4, true)`,
+            [modelId, provider.id, modelId, priority],
+          );
+          routedCount += 1;
+        }
+      }
+
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    app.routerCache.invalidate();
+    app.priceCache.invalidate();
+    return {
+      discoveredCount: discovery.modelIds.length,
+      newModelCount,
+      routedCount,
+      skippedStandardMismatch,
+      modelIds: discovery.modelIds,
+    };
   });
 };
 

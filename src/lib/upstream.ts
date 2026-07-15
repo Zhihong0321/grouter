@@ -139,6 +139,69 @@ export async function checkProviderHealth(target: { standard: ProviderStandard; 
   };
 }
 
+export interface ProviderModelListResult {
+  ok: boolean;
+  statusCode?: number;
+  latencyMs: number;
+  /** Model IDs advertised by the provider's GET /v1/models, deduped + sorted. */
+  modelIds: string[];
+  message: string;
+}
+
+/**
+ * Lists a provider's advertised models via GET /v1/models -- the same
+ * zero-cost metadata lookup checkProviderHealth uses, but returning the model
+ * IDs so a caller can auto-register them. Both OpenAI-standard
+ * ({object:"list", data:[{id}]}) and Anthropic-standard ({data:[{id}]})
+ * responses expose the ID at data[].id, so one parser covers both.
+ */
+export async function listProviderModels(target: {
+  standard: ProviderStandard;
+  baseUrl: string;
+  apiKey: string;
+}): Promise<ProviderModelListResult> {
+  const start = Date.now();
+  let response: Response;
+  try {
+    response = await fetchModels(target);
+  } catch (err) {
+    const timedOut = err instanceof Error && err.name === "AbortError";
+    return {
+      ok: false,
+      latencyMs: Date.now() - start,
+      modelIds: [],
+      message: timedOut ? "Timed out after 10s" : err instanceof Error ? err.message : "Unknown error",
+    };
+  }
+
+  const latencyMs = Date.now() - start;
+  const json = (await response.json().catch(() => undefined)) as
+    | { error?: { message?: string } | string; message?: string; data?: unknown[] }
+    | undefined;
+  const upstreamMessage = typeof json?.error === "string" ? json.error : json?.error?.message ?? json?.message;
+
+  if (!response.ok) {
+    return { ok: false, statusCode: response.status, latencyMs, modelIds: [], message: upstreamMessage ?? `Upstream returned ${response.status}` };
+  }
+  if (!Array.isArray(json?.data)) {
+    return { ok: false, statusCode: response.status, latencyMs, modelIds: [], message: "Provider did not return a model list at data[]" };
+  }
+
+  const modelIds: string[] = [];
+  for (const model of json.data) {
+    const id = model && typeof model === "object" && "id" in model ? (model as { id?: unknown }).id : undefined;
+    if (typeof id === "string" && id.trim().length > 0) modelIds.push(id.trim());
+  }
+  const unique = [...new Set(modelIds)].sort();
+  return {
+    ok: true,
+    statusCode: response.status,
+    latencyMs,
+    modelIds: unique,
+    message: `Discovered ${unique.length} model(s)`,
+  };
+}
+
 export interface EndpointTestResult {
   ok: boolean;
   statusCode?: number;
