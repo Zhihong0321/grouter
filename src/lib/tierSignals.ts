@@ -98,7 +98,9 @@ function contentTokens(content: unknown): number {
   if (!Array.isArray(content)) return 0;
   let len = 0;
   for (const block of content) len += blockTextLength(block);
-  return estimateTokens(len);
+  // len is already a character count -- convert with the same ~4 chars/token
+  // heuristic as estimateTokens, which takes a string, not a length.
+  return Math.ceil(len / 4);
 }
 
 /**
