@@ -154,37 +154,39 @@ export interface ProviderModelListResult {
  * IDs so a caller can auto-register them. Both OpenAI-standard
  * ({object:"list", data:[{id}]}) and Anthropic-standard ({data:[{id}]})
  * responses expose the ID at data[].id, so one parser covers both.
+ *
+ * Fallback: some Anthropic-compatible relays serve /v1/messages but have no
+ * /v1/models (e.g. Xiaomi MiMo's /anthropic endpoint 404s on the list, while
+ * the sibling OpenAI endpoint at the host root lists the same model IDs on the
+ * same key). When the provider's own listing fails, we try that sibling before
+ * giving up, so "Discover models" still works on those Anthropic endpoints.
  */
-export async function listProviderModels(target: {
-  standard: ProviderStandard;
-  baseUrl: string;
-  apiKey: string;
-}): Promise<ProviderModelListResult> {
-  const start = Date.now();
+async function fetchModelsAt(
+  url: string,
+  headers: Record<string, string>,
+): Promise<{ ok: boolean; statusCode?: number; modelIds: string[]; message: string }> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), HEALTH_CHECK_TIMEOUT_MS);
   let response: Response;
   try {
-    response = await fetchModels(target);
+    response = await fetch(url, { method: "GET", headers, signal: controller.signal });
   } catch (err) {
     const timedOut = err instanceof Error && err.name === "AbortError";
-    return {
-      ok: false,
-      latencyMs: Date.now() - start,
-      modelIds: [],
-      message: timedOut ? "Timed out after 10s" : err instanceof Error ? err.message : "Unknown error",
-    };
+    return { ok: false, modelIds: [], message: timedOut ? "Timed out after 10s" : err instanceof Error ? err.message : "Unknown error" };
+  } finally {
+    clearTimeout(timeout);
   }
 
-  const latencyMs = Date.now() - start;
   const json = (await response.json().catch(() => undefined)) as
     | { error?: { message?: string } | string; message?: string; data?: unknown[] }
     | undefined;
   const upstreamMessage = typeof json?.error === "string" ? json.error : json?.error?.message ?? json?.message;
 
   if (!response.ok) {
-    return { ok: false, statusCode: response.status, latencyMs, modelIds: [], message: upstreamMessage ?? `Upstream returned ${response.status}` };
+    return { ok: false, statusCode: response.status, modelIds: [], message: upstreamMessage ?? `Upstream returned ${response.status}` };
   }
   if (!Array.isArray(json?.data)) {
-    return { ok: false, statusCode: response.status, latencyMs, modelIds: [], message: "Provider did not return a model list at data[]" };
+    return { ok: false, statusCode: response.status, modelIds: [], message: "Provider did not return a model list at data[]" };
   }
 
   const modelIds: string[] = [];
@@ -193,13 +195,33 @@ export async function listProviderModels(target: {
     if (typeof id === "string" && id.trim().length > 0) modelIds.push(id.trim());
   }
   const unique = [...new Set(modelIds)].sort();
-  return {
-    ok: true,
-    statusCode: response.status,
-    latencyMs,
-    modelIds: unique,
-    message: `Discovered ${unique.length} model(s)`,
-  };
+  return { ok: true, statusCode: response.status, modelIds: unique, message: `Discovered ${unique.length} model(s)` };
+}
+
+export async function listProviderModels(target: {
+  standard: ProviderStandard;
+  baseUrl: string;
+  apiKey: string;
+}): Promise<ProviderModelListResult> {
+  const start = Date.now();
+  const base = target.baseUrl.replace(/\/+$/, "").replace(/\/v1$/i, "");
+
+  const primary = await fetchModelsAt(`${base}/v1/models`, authHeaders(target));
+  if (primary.ok) {
+    return { ...primary, latencyMs: Date.now() - start };
+  }
+
+  // Sibling fallback: an Anthropic endpoint mounted at `.../anthropic` whose
+  // model list lives on the OpenAI endpoint at the host root, same key.
+  const sibling = base.replace(/\/anthropic$/i, "");
+  if (target.standard === "anthropic" && sibling !== base) {
+    const fallback = await fetchModelsAt(`${sibling}/v1/models`, { authorization: `Bearer ${target.apiKey}` });
+    if (fallback.ok) {
+      return { ...fallback, latencyMs: Date.now() - start, message: `${fallback.message} (via sibling OpenAI endpoint)` };
+    }
+  }
+
+  return { ...primary, latencyMs: Date.now() - start };
 }
 
 export interface EndpointTestResult {

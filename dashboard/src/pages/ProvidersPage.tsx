@@ -12,9 +12,9 @@ const EMPTY: NewProvider = { name: "", baseUrl: "", apiKey: "", standard: "opena
 
 // One-click presets fill everything except the key. Base URLs are verified
 // against each provider's live endpoints. MiniMax's single account token serves
-// M3 + M2.7-highspeed, so one provider covers both. Note: Xiaomi's Anthropic
-// endpoint serves /v1/messages but has no /v1/models, so "Discover models"
-// only works on its OpenAI preset -- add models manually for the Anthropic one.
+// M3 + M2.7-highspeed, so one provider covers both. Xiaomi's Anthropic endpoint
+// serves /v1/messages but has no /v1/models; Discover falls back to its sibling
+// OpenAI listing (same host + key), so auto-detect works on both presets.
 const PRESETS: { label: string; value: Omit<NewProvider, "apiKey"> }[] = [
   { label: "MiniMax (Anthropic)", value: { name: "MiniMax Official", baseUrl: "https://api.minimax.io/anthropic", standard: "anthropic" } },
   { label: "MiniMax (OpenAI)", value: { name: "MiniMax Official", baseUrl: "https://api.minimax.io/v1", standard: "openai" } },
