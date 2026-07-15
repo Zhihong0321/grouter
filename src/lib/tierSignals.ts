@@ -57,6 +57,51 @@ function estimateTokens(text: string): number {
 }
 
 /**
+ * Sum the text length of a single content block. A plain `text` block is the
+ * common case, but an investigation turn's *real* bulk lives in `tool_result`
+ * blocks (file reads, command output) and `tool_use` blocks (the arguments the
+ * model sent) -- both of which store their payload somewhere other than a
+ * top-level `.text`. Missing these made large-context investigation turns
+ * measure as "short" and never trip the long_context -> brain rule, defeating
+ * the whole point of routing investigation to a high-IQ model. So we descend:
+ *
+ *   - text block:        block.text
+ *   - tool_result block: block.content (string, or nested array of blocks)
+ *   - tool_use block:    JSON of block.input (its argument payload)
+ */
+function blockTextLength(block: unknown): number {
+  if (typeof block === "string") return block.length;
+  if (typeof block !== "object" || block === null) return 0;
+  const b = block as Record<string, unknown>;
+  let len = 0;
+  if (typeof b.text === "string") len += b.text.length;
+  if (typeof b.content === "string") {
+    len += b.content.length;
+  } else if (Array.isArray(b.content)) {
+    for (const inner of b.content) len += blockTextLength(inner);
+  }
+  // tool_use arguments: no free-text field, but the serialized input is real
+  // context weight (e.g. a large file being written back).
+  if (b.type === "tool_use" && b.input !== undefined) {
+    try {
+      len += JSON.stringify(b.input).length;
+    } catch {
+      // circular/unserializable input -- ignore, it can't have come off the wire
+    }
+  }
+  return len;
+}
+
+/** Total estimated tokens across a message-list `content` field (string or block array). */
+function contentTokens(content: unknown): number {
+  if (typeof content === "string") return estimateTokens(content);
+  if (!Array.isArray(content)) return 0;
+  let len = 0;
+  for (const block of content) len += blockTextLength(block);
+  return estimateTokens(len);
+}
+
+/**
  * Maps a client-requested model name to the nearest tier when it isn't an
  * exact match for one of the configured tier models (e.g. a client asking
  * for a model that isn't the admin's current brain/build/routine pick).
@@ -92,20 +137,13 @@ export function signalsFromAnthropic(body: Record<string, unknown>, cfg: Anthrop
   const system = typeof body.system === "string" ? body.system : "";
   const tools = Array.isArray(body.tools) ? body.tools : [];
 
-  // Extract text content from messages (not JSON structure)
-  let contentText = system;
+  // Estimate input weight from text content AND tool_result / tool_use blocks
+  // (see blockTextLength) -- file reads and command output are the bulk of an
+  // investigation turn and must count toward the long_context threshold.
+  let inputTokens = system ? estimateTokens(system) : 0;
   for (const msg of messages) {
     if (typeof msg === "object" && msg !== null) {
-      const content = (msg as Record<string, unknown>).content;
-      if (typeof content === "string") {
-        contentText += content;
-      } else if (Array.isArray(content)) {
-        for (const block of content) {
-          if (typeof block === "object" && block !== null && typeof (block as Record<string, unknown>).text === "string") {
-            contentText += (block as Record<string, unknown>).text;
-          }
-        }
-      }
+      inputTokens += contentTokens((msg as Record<string, unknown>).content);
     }
   }
 
@@ -114,7 +152,7 @@ export function signalsFromAnthropic(body: Record<string, unknown>, cfg: Anthrop
     requestedTier: classifyRequestedTier(model, cfg.tiers),
     isBackground: model.length > 0 && model === cfg.smallFastModelName,
     thinkingEnabled: thinking?.type === "enabled",
-    inputTokens: estimateTokens(contentText),
+    inputTokens,
     hasTools: tools.length > 0,
   };
 }
@@ -140,26 +178,16 @@ export function signalsFromOpenAI(
   const tools = Array.isArray(body.tools) ? body.tools : [];
   const content = endpoint === "responses" ? body.input : body.messages;
 
-  // Extract text content from messages/input (not JSON structure)
-  let contentText = "";
+  // Same tool-aware counting as the Anthropic path: a Codex investigation turn
+  // carries its file reads / command output in the message list, not just plain
+  // text, so count blocks too (see blockTextLength).
+  let inputTokens = 0;
   if (typeof content === "string") {
-    contentText = content;
+    inputTokens = estimateTokens(content);
   } else if (Array.isArray(content)) {
     for (const msg of content) {
       if (typeof msg === "object" && msg !== null) {
-        const msgContent = (msg as Record<string, unknown>).content;
-        if (typeof msgContent === "string") {
-          contentText += msgContent;
-        } else if (Array.isArray(msgContent)) {
-          for (const block of msgContent) {
-            if (typeof block === "object" && block !== null) {
-              const text = (block as Record<string, unknown>).text;
-              if (typeof text === "string") {
-                contentText += text;
-              }
-            }
-          }
-        }
+        inputTokens += contentTokens((msg as Record<string, unknown>).content);
       }
     }
   }
@@ -169,7 +197,7 @@ export function signalsFromOpenAI(
     requestedTier: effort ? mapEffortToTier(effort) : classifyRequestedTier(model, cfg.tiers),
     isBackground: false,
     thinkingEnabled: effort === "high",
-    inputTokens: estimateTokens(contentText),
+    inputTokens,
     hasTools: tools.length > 0,
   };
 }

@@ -68,6 +68,50 @@ describe("signalsFromAnthropic", () => {
     );
     expect(long.inputTokens).toBeGreaterThan(short.inputTokens);
   });
+
+  it("counts tool_result content (file reads) toward the token estimate", () => {
+    // An investigation turn: the visible user text is tiny, but a tool_result
+    // block carries a large file. This must trip long-context routing, so the
+    // token count has to reflect the file, not just the prose.
+    const fileBody = "y".repeat(40_000);
+    const sig = signalsFromAnthropic(
+      {
+        model: "claude-sonnet-5",
+        messages: [
+          { role: "user", content: "what does this file do?" },
+          {
+            role: "user",
+            content: [
+              { type: "tool_result", tool_use_id: "t1", content: fileBody },
+            ],
+          },
+        ],
+      },
+      cfg,
+    );
+    expect(sig.inputTokens).toBeGreaterThan(9_000);
+  });
+
+  it("counts nested tool_result block arrays and tool_use input", () => {
+    const fileBody = "z".repeat(20_000);
+    const sig = signalsFromAnthropic(
+      {
+        model: "claude-sonnet-5",
+        messages: [
+          {
+            role: "assistant",
+            content: [{ type: "tool_use", id: "t1", name: "read", input: { path: "a".repeat(20_000) } }],
+          },
+          {
+            role: "user",
+            content: [{ type: "tool_result", tool_use_id: "t1", content: [{ type: "text", text: fileBody }] }],
+          },
+        ],
+      },
+      cfg,
+    );
+    expect(sig.inputTokens).toBeGreaterThan(9_000);
+  });
 });
 
 describe("signalsFromOpenAI", () => {
