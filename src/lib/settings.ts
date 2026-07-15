@@ -26,15 +26,20 @@ export const SETTINGS_KEYS = {
 
 const DEFAULT_TIER_CONFIG: TierConfig = {
   tiers: {
+    // Operator's allowed-model list (no Sonnet, no Haiku). Claude Code's
+    // non-brain tiers use near-free Anthropic-standard models, since
+    // gpt-5.5i-compact is OpenAI-standard and can't serve /v1/messages.
+    // Kept in sync with migration 1784120600000_tier_maps_allowed_models.sql,
+    // which forces these into prod (these are only unset-key fallbacks).
     anthropic: {
-      brain: "claude-opus-4-8",
-      build: "claude-sonnet-5",
-      routine: "claude-haiku-4-5",
+      brain: "claude-opus-4-8", // plan/think/investigate
+      build: "mimo-v2.5-pro",   // execute a plan -- near-free
+      routine: "MiniMax-M3",    // read/run -- near-free
     },
     openai: {
-      brain: "gpt-5",
-      build: "gpt-5",
-      routine: "gpt-5-mini",
+      brain: "gpt-5.6-sol",
+      build: "gpt-5.5i-compact",   // workhorse; overwrites sonnet/luna-class
+      routine: "gpt-5.5i-compact",
     },
   },
   longContextTokens: 60_000,
