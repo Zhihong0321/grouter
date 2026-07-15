@@ -10,6 +10,15 @@ interface NewProvider {
 
 const EMPTY: NewProvider = { name: "", baseUrl: "", apiKey: "", standard: "openai" };
 
+// One-click presets fill everything except the key. Base URLs are verified
+// against each provider's live GET /v1/models; MiniMax's single account token
+// serves M3 + M2.7-highspeed, so one provider covers both.
+const PRESETS: { label: string; value: Omit<NewProvider, "apiKey"> }[] = [
+  { label: "MiniMax Official", value: { name: "MiniMax Official", baseUrl: "https://api.minimax.io/anthropic", standard: "anthropic" } },
+  { label: "MiniMax (OpenAI)", value: { name: "MiniMax Official", baseUrl: "https://api.minimax.io/v1", standard: "openai" } },
+  { label: "Xiaomi MiMo", value: { name: "Xiaomi MiMo", baseUrl: "https://token-plan-sgp.xiaomimimo.com/v1", standard: "openai" } },
+];
+
 export default function ProvidersPage() {
   const [providers, setProviders] = useState<ProviderDto[]>([]);
   const [draft, setDraft] = useState<NewProvider>(EMPTY);
@@ -92,6 +101,16 @@ export default function ProvidersPage() {
 
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Add provider</h3>
+        <div className="form-row">
+          <label>Quick fill</label>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {PRESETS.map((preset) => (
+              <button key={preset.label} type="button" className="secondary" onClick={() => setDraft((current) => ({ ...preset.value, apiKey: current.apiKey }))}>
+                {preset.label}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="form-row">
           <label>Name</label>
           <input value={draft.name} placeholder="MiniMax Official" onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
