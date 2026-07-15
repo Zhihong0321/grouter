@@ -1,0 +1,5 @@
+# Shell scripts that run on macOS/Linux must keep LF endings, or the
+# shebang breaks when checked out. The .command launcher is double-clicked
+# in Finder and is especially sensitive to this.
+*.command text eol=lf
+*.sh      text eol=lf
