@@ -142,7 +142,20 @@ export interface UsageBreakdown {
 export interface UsageResponse {
   breakdown: UsageBreakdown;
   daily: { day: string; cost_cents: string; total_tokens: string }[];
-  recent: any[];
+  recent: UsageRecentRequest[];
+}
+
+export interface UsageRecentRequest {
+  id: string;
+  created_at: string;
+  model: string;
+  input_tokens: string;
+  output_tokens: string;
+  cache_creation_input_tokens: string;
+  cache_read_input_tokens: string;
+  cost_cents: string;
+  status_code: number;
+  actual_subrouter_cost_usd: string | null;
 }
 
 export interface SettingsDto {

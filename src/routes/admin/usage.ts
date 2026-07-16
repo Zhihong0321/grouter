@@ -42,7 +42,17 @@ const usageRoutes: FastifyPluginAsync = async (app) => {
       );
 
       const { rows: recent } = await app.pg.query(
-        `SELECT * FROM reseller_usage_logs WHERE key_id = $1 ORDER BY created_at DESC LIMIT 50`,
+        `SELECT
+           usage.*,
+           activity.wallet_cost_usd::text AS actual_subrouter_cost_usd
+         FROM reseller_usage_logs usage
+         LEFT JOIN reseller_usage_supplier_matches usage_match
+           ON usage_match.usage_log_id = usage.id
+         LEFT JOIN reseller_supplier_activity activity
+           ON activity.id = usage_match.supplier_activity_id
+         WHERE usage.key_id = $1
+         ORDER BY usage.created_at DESC
+         LIMIT 50`,
         [request.params.id],
       );
 

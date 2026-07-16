@@ -3,6 +3,10 @@ import { useParams } from "react-router-dom";
 import { api, centsToDollars, type ApiKeyDto, type UsageResponse } from "../api/client.js";
 import ConnectionInfo from "../components/ConnectionInfo.js";
 
+function actualSubrouterCost(value: string | null): string {
+  return value === null ? "Pending" : `$${Number(value).toFixed(6)}`;
+}
+
 export default function KeyDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [key, setKey] = useState<ApiKeyDto | null>(null);
@@ -108,7 +112,7 @@ export default function KeyDetailPage() {
         <table>
           <thead>
             <tr>
-              <th>Time</th><th>Model</th><th>In</th><th>Out</th><th>Cache W</th><th>Cache R</th><th>Cost</th><th>Status</th>
+              <th>Time</th><th>Model</th><th>In</th><th>Out</th><th>Cache W</th><th>Cache R</th><th>Cost</th><th>Actual SubRouter cost</th><th>Status</th>
             </tr>
           </thead>
           <tbody>
@@ -121,6 +125,7 @@ export default function KeyDetailPage() {
                 <td>{r.cache_creation_input_tokens}</td>
                 <td>{r.cache_read_input_tokens}</td>
                 <td>{centsToDollars(r.cost_cents)}</td>
+                <td>{actualSubrouterCost(r.actual_subrouter_cost_usd)}</td>
                 <td>{r.status_code}</td>
               </tr>
             ))}
