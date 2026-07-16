@@ -1,8 +1,14 @@
 import type { FastifyBaseLogger } from "fastify";
 import { callUpstream, type ProviderTarget, type UpstreamCallResult, type UpstreamEndpoint } from "./upstream.js";
+import { ProviderHealthTracker } from "./providerHealth.js";
 import type { ResolvedRoute } from "../types/router.js";
 
-const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504, 529]);
+// Creates a fresh noop tracker per call -- callers that don't supply a shared
+// tracker (e.g. legacy unit tests) still get correct per-request failover, but
+// without any cross-request state that would bleed between test cases.
+function makeNoopTracker(): ProviderHealthTracker {
+  return new ProviderHealthTracker({ disableProvider() {}, disableRoute() {} });
+}
 
 export interface FailoverAttempt {
   providerName: string;
@@ -25,13 +31,21 @@ export class AllProvidersFailedError extends Error {
 }
 
 /**
- * Tries each route in priority order, only advancing to the next on a
- * network error or a retryable status code (429/5xx/529 -- overloaded or
- * transient). Anything else (400/401/403/404/etc, a request/config problem)
- * is returned immediately so retrying another provider never wastes money or
- * hides misconfiguration. Callers must invoke this BEFORE writing any byte to
- * the client -- fetch() resolves once headers arrive, so the retry decision
- * always happens ahead of both the streaming and non-streaming response path.
+ * Tries each route until one gives a usable answer, consulting a shared
+ * ProviderHealthTracker to decide both order and when to advance:
+ *
+ *  - The tracker sinks currently-"resting" providers to the back, so a key that
+ *    dropped a request during a peak is skipped in favour of a healthy backup
+ *    (but still used as a last resort if every route is resting).
+ *  - It advances to the next route on a network error, a retryable status
+ *    (429/5xx/529), or an auth/balance/model failure (401/402/404) -- the last
+ *    group also rests or disables the offending provider/route so it stops
+ *    getting hammered. Any other status (400/403/422/...) is a request problem
+ *    another provider won't fix, so it's returned immediately.
+ *
+ * Callers must invoke this BEFORE writing any byte to the client -- fetch()
+ * resolves once headers arrive, so the retry decision always happens ahead of
+ * both the streaming and non-streaming response path.
  */
 export async function callWithFailover(
   routes: ResolvedRoute[],
@@ -39,10 +53,12 @@ export async function callWithFailover(
   anthropicVersion: string | undefined,
   log: Pick<FastifyBaseLogger, "warn">,
   endpoint: UpstreamEndpoint = "messages",
+  tracker?: ProviderHealthTracker,
 ): Promise<FailoverResult> {
+  const t = tracker ?? makeNoopTracker();
   const attempts: FailoverAttempt[] = [];
 
-  for (const route of routes) {
+  for (const route of t.order(routes)) {
     const target: ProviderTarget = {
       standard: route.standard,
       baseUrl: route.baseUrl,
@@ -57,12 +73,21 @@ export async function callWithFailover(
       const message = err instanceof Error ? err.message : "Unknown error";
       attempts.push({ providerName: route.providerName, error: message });
       log.warn({ provider: route.providerName, err: message }, "upstream provider request failed, trying next");
+      t.recordAttempt(route, { kind: "networkError" });
       continue;
     }
 
-    if (!result.response.ok && RETRYABLE_STATUS_CODES.has(result.response.status)) {
+    const { failover } = t.recordAttempt(
+      route,
+      result.response.ok ? { kind: "success" } : { kind: "status", status: result.response.status },
+    );
+
+    if (failover) {
       attempts.push({ providerName: route.providerName, statusCode: result.response.status });
-      log.warn({ provider: route.providerName, status: result.response.status }, "upstream provider returned retryable error, trying next");
+      log.warn(
+        { provider: route.providerName, status: result.response.status },
+        "upstream provider returned failover-eligible error, trying next",
+      );
       continue;
     }
 

@@ -105,4 +105,133 @@ describe("callWithFailover", () => {
     const sentBody = JSON.parse(init.body);
     expect(sentBody.model).toBe("supplier-internal-sonnet");
   });
+
+  // ----- Tracker integration -----------------------------------------------
+
+  it("skips the resting primary and goes straight to the backup when a tracker is supplied", async () => {
+    const { ProviderHealthTracker } = await import("../src/lib/providerHealth.js");
+    const tracker = new ProviderHealthTracker(
+      { disableProvider() {}, disableRoute() {} },
+      { restMs: 5_000, now: () => 1 },
+    );
+
+    const primary = makeRoute(1, "primary");
+    const backup = makeRoute(2, "backup");
+
+    // Mark primary as resting (at t=0, now=1 means still within 5s window)
+    tracker.recordAttempt(primary, { kind: "networkError" });
+
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    global.fetch = fetchMock as any;
+
+    const result = await callWithFailover([primary, backup], { model: "claude-sonnet-5" }, undefined, noopLog, "messages", tracker);
+
+    // Backup was called first (primary was sinked to the back); backup succeeded.
+    expect(result.providerId).toBe(backup.providerId);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls over to the backup on 401 and marks primary as resting", async () => {
+    const { ProviderHealthTracker } = await import("../src/lib/providerHealth.js");
+    const disableProvider = vi.fn();
+    const tracker = new ProviderHealthTracker(
+      { disableProvider, disableRoute() {} },
+      { restMs: 5_000, authRestMs: 3_600_000, authStrikes: 3, now: () => 0 },
+    );
+
+    const primary = makeRoute(1, "primary");
+    const backup = makeRoute(2, "backup");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    global.fetch = fetchMock as any;
+
+    const result = await callWithFailover([primary, backup], { model: "claude-sonnet-5" }, undefined, noopLog, "messages", tracker);
+
+    expect(result.providerId).toBe(backup.providerId);
+    expect(result.attempts).toHaveLength(1);
+    expect(result.attempts[0].providerName).toBe("primary");
+    expect(result.attempts[0].statusCode).toBe(401);
+    expect(disableProvider).not.toHaveBeenCalled(); // only 1 strike, not 3
+  });
+
+  it("disables the primary provider after 3 consecutive 401s across separate requests", async () => {
+    const { ProviderHealthTracker } = await import("../src/lib/providerHealth.js");
+    const disableProvider = vi.fn();
+    // Use a clock that advances so the 1-hour auth rest never blocks the next
+    // simulated request (each "request" happens at t = 0, 3700000, 7400000 --
+    // past the 1h window -- but that would clear state; instead use authStrikes=3
+    // with a very short authRestMs so consecutive strikes still accumulate).
+    const tracker = new ProviderHealthTracker(
+      { disableProvider, disableRoute() {} },
+      { restMs: 5_000, authRestMs: 10, authStrikes: 3, now: () => 0 },
+    );
+
+    // Simulate 3 separate requests where primary is the only route each time
+    // (no backup, so order() has nothing to sink primary behind). Each call
+    // gets a single 401 response; on the 3rd the tracker fires disableProvider.
+    const primary = makeRoute(1, "primary");
+
+    for (let i = 0; i < 3; i++) {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 }));
+      global.fetch = fetchMock as any;
+      try {
+        await callWithFailover([primary], { model: "claude-sonnet-5" }, undefined, noopLog, "messages", tracker);
+      } catch {
+        // AllProvidersFailedError expected when primary is the only route
+      }
+    }
+
+    expect(disableProvider).toHaveBeenCalledWith(primary.providerId);
+    expect(disableProvider).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls over on 402 and calls disableProvider", async () => {
+    const { ProviderHealthTracker } = await import("../src/lib/providerHealth.js");
+    const disableProvider = vi.fn();
+    const tracker = new ProviderHealthTracker(
+      { disableProvider, disableRoute() {} },
+      { restMs: 5_000, now: () => 0 },
+    );
+
+    const primary = makeRoute(1, "primary");
+    const backup = makeRoute(2, "backup");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "payment required" }), { status: 402 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    global.fetch = fetchMock as any;
+
+    const result = await callWithFailover([primary, backup], { model: "claude-sonnet-5" }, undefined, noopLog, "messages", tracker);
+
+    expect(result.providerId).toBe(backup.providerId);
+    expect(disableProvider).toHaveBeenCalledWith(primary.providerId);
+  });
+
+  it("falls over on 404 and calls disableRoute (not disableProvider)", async () => {
+    const { ProviderHealthTracker } = await import("../src/lib/providerHealth.js");
+    const disableProvider = vi.fn();
+    const disableRoute = vi.fn();
+    const tracker = new ProviderHealthTracker(
+      { disableProvider, disableRoute },
+      { restMs: 5_000, now: () => 0 },
+    );
+
+    const primary = { ...makeRoute(1, "primary"), routeId: "route-primary-id" };
+    const backup = makeRoute(2, "backup");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "not found" }), { status: 404 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    global.fetch = fetchMock as any;
+
+    const result = await callWithFailover([primary, backup], { model: "claude-sonnet-5" }, undefined, noopLog, "messages", tracker);
+
+    expect(result.providerId).toBe(backup.providerId);
+    expect(disableRoute).toHaveBeenCalledWith("route-primary-id");
+    expect(disableProvider).not.toHaveBeenCalled();
+  });
 });

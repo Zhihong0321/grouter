@@ -62,6 +62,7 @@ const countTokensRoutes: FastifyPluginAsync = async (app) => {
         typeof anthropicVersion === "string" ? anthropicVersion : undefined,
         request.log,
         "messages/count_tokens",
+        app.providerHealth,
       );
     } catch (err) {
       if (err instanceof AllProvidersFailedError) {

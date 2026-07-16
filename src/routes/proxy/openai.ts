@@ -142,7 +142,7 @@ async function handleOpenAiRequest(app: Parameters<FastifyPluginAsync>[0], reque
   const dispatchStartMs = Date.now();
   let failover;
   try {
-    failover = await callWithFailover(routes, body, undefined, request.log, endpoint);
+    failover = await callWithFailover(routes, body, undefined, request.log, endpoint, app.providerHealth);
   } catch (err) {
     if (err instanceof AllProvidersFailedError) {
       request.log.error({ model, endpoint, attempts: err.attempts }, "all upstream providers failed for this model");

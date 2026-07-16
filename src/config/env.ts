@@ -30,6 +30,13 @@ const schema = z.object({
   // the Tauri client app) so it can't be spammed by a bot that finds the URL.
   // Baked into the app build, not tied to any one user's session.
   CLIENT_BOOTSTRAP_SECRET: z.string().min(16),
+  // Provider health tracker (src/lib/providerHealth.ts): how long a supplier key
+  // is rested after dropping a request during a peak (network error / 429 / 5xx)
+  // before it's tried again; how long it's rested after a 401; and how many
+  // consecutive 401s (no success in between) turn the provider off entirely.
+  PROVIDER_REST_MS: z.coerce.number().int().positive().default(5000),
+  PROVIDER_AUTH_REST_MS: z.coerce.number().int().positive().default(3_600_000),
+  PROVIDER_AUTH_STRIKES: z.coerce.number().int().positive().default(3),
 });
 
 export const env = schema.parse(process.env);

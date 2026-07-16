@@ -138,6 +138,8 @@ const proxyRoutes: FastifyPluginAsync = async (app) => {
         body,
         typeof anthropicVersion === "string" ? anthropicVersion : undefined,
         request.log,
+        "messages",
+        app.providerHealth,
       );
     } catch (err) {
       if (err instanceof AllProvidersFailedError) {

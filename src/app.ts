@@ -10,6 +10,7 @@ import redisPlugin from "./plugins/redis.js";
 import { PriceCache } from "./lib/pricing.js";
 import { SettingsCache } from "./lib/settings.js";
 import { RouterCache } from "./lib/router.js";
+import { ProviderHealthTracker } from "./lib/providerHealth.js";
 import { RedisSessionStore } from "./lib/sessionStore.js";
 import { migrateLegacySubrouter } from "./lib/legacyMigration.js";
 import { scheduleSupplierActivitySync } from "./lib/supplierActivitySchedule.js";
@@ -39,6 +40,7 @@ declare module "fastify" {
     priceCache: PriceCache;
     settingsCache: SettingsCache;
     routerCache: RouterCache;
+    providerHealth: ProviderHealthTracker;
   }
 }
 
@@ -57,6 +59,32 @@ export async function buildApp() {
   app.decorate("priceCache", new PriceCache(app.pg));
   app.decorate("settingsCache", new SettingsCache(app.pg));
   app.decorate("routerCache", new RouterCache(app.pg));
+
+  // Auto-off effects persist by flipping the same `active` flags the admin
+  // toggle and RouterCache already honor, so a drained/dead key stays off
+  // across deploys until an admin re-enables it (never auto-reactivated here).
+  app.decorate(
+    "providerHealth",
+    new ProviderHealthTracker(
+      {
+        disableProvider: async (providerId) => {
+          await app.pg.query("UPDATE reseller_providers SET active = false WHERE id = $1", [providerId]);
+          app.routerCache.invalidate();
+          app.log.warn({ providerId }, "provider auto-disabled by health tracker (401x3 or 402)");
+        },
+        disableRoute: async (routeId) => {
+          await app.pg.query("UPDATE reseller_model_routes SET active = false WHERE id = $1", [routeId]);
+          app.routerCache.invalidate();
+          app.log.warn({ routeId }, "model route auto-disabled by health tracker (404 -- model not on this key)");
+        },
+      },
+      {
+        restMs: env.PROVIDER_REST_MS,
+        authRestMs: env.PROVIDER_AUTH_REST_MS,
+        authStrikes: env.PROVIDER_AUTH_STRIKES,
+      },
+    ),
+  );
 
   // One-time, self-invalidating: converts the pre-router single subrouter
   // config into a real provider + routes on first boot. No-op on every boot
